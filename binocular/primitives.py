@@ -3,86 +3,26 @@ from typing import List, Union, Set, IO, Optional
 from functools import cached_property
 from pathlib import Path
 import tempfile
+import hashlib
 
 import networkx as nx
 from pydantic import BaseModel, computed_field
-from checksec.elf import ELFSecurity, ELFChecksecData
+from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 
 from .consts import Endian
 
-class NativeCode(BaseModel):
-    _context:NativeCode = None
-
-    def context(self):
-        '''
-        Provides Flexibilty for objects to have either 
-            - inheritable properties from containering objects
-            - properties as a standalong object that has no container
-
-        e.g., An Instruction has endianness, but if we know the basic block containing
-        the instruction, then we dont need to store the endianness to each instruction and
-        just query the containing basic block. Yes the variable space is already allocated
-        but it avoids having to set the endianess of each instruction in a bb
-        '''
-        if self._context is None:
-            return self
-        return self._context.context()
-
-    _endianness: Optional[Endian] = None
-    _architecture: Optional[str] = None
-    _bitness: Optional[int] = None
-
-    @computed_field(repr=False)
-    @property
-    def endianness(self) -> Endian:
-        if self.context() == self:
-            return self._endianness
-        return self.context().endianness
-
-    @endianness.setter
-    def endianness(self, value:Union[str, Endian]) -> None:
-        if isinstance(value, str):
-            if value.lower() == 'little':
-                value = Endian.LITTLE
-            elif value.lower() == 'big':
-                value = Endian.BIG
-            else:
-                value = Endian.OTHER
-
-        self._endianness = value
-    
-
-    @computed_field(repr=False)
-    @property
-    def architecture(self) -> str:
-        if self.context() == self:
-            return self._architecture
-        return self.context().architecture
-
-    @architecture.setter
-    def architecture(self, value:str) -> None:
-        self._architecture = value
-
-    @computed_field(repr=False)
-    @property
-    def bitness(self) -> int:
-        if self.context() == self:
-            return self._bitness
-        return self.context().bitness
-
-    @bitness.setter
-    def bitness(self, value:int) -> None:
-        self._bitness = value
-
-class Instruction(NativeCode):
+class Instruction(BaseModel):
     '''Represents a single instruction'''
 
-    _context:BasicBlock = None
+    endianness: Optional[Endian] = None
+    architecture: Optional[str] = None
+    bitness: Optional[int] = None
 
     address: Optional[int]
     data: bytes
     opcode: str
     operands: List[str]
+    
 
     xref_to: List[int]
     xref_from: List[int]
@@ -102,9 +42,10 @@ class Instruction(NativeCode):
     def __contains__(self, x:bytes):
         return x in self.data
 
-
-class BasicBlock(NativeCode):
-    _context:Function = None
+class BasicBlock(BaseModel): 
+    endianness: Optional[Endian] = None
+    architecture: Optional[str] = None
+    bitness: Optional[int] = None
 
     instructions: List[Instruction]
     is_prologue: bool
@@ -114,7 +55,7 @@ class BasicBlock(NativeCode):
     xref_from: List[int]
 
     _size_bytes: int = None
-    _pie:str = None
+    pie:PIEType = None
 
     # TODO Consider
     # next() -> return subsequent blocks
@@ -144,22 +85,15 @@ class BasicBlock(NativeCode):
             b += instr.data
         return b
 
-    @computed_field(repr=False)
-    @property
-    def pie(self) -> str:
-        if self.context() == self:
-            return self._pie
-        return self.context().pie
-
-    @pie.setter
-    def pie(self, value) -> None:
-        self._pie = value
-
     def num_instructions(self):
         return len(self.instructions)
 
-class Function(NativeCode):
-    _context:Binary = None
+class Function(BaseModel):
+    endianness: Optional[Endian] = None
+    architecture: Optional[str] = None
+    bitness: Optional[int] = None
+    pie:PIEType = None
+    canary:bool = None
 
     name:str
     basic_blocks: Set[BasicBlock]
@@ -169,8 +103,7 @@ class Function(NativeCode):
     xref_to: List[int]
     xref_from: List[int]
 
-    _pie:str = None
-    _canary:bool = None
+    
 
     # TODO CONSIDER:
     # get call args
@@ -189,27 +122,6 @@ class Function(NativeCode):
             return any([x in bb for bb in self.basic_blocks])
         raise TypeError
 
-    @computed_field(repr=False)
-    @property
-    def pie(self):
-        if self._context == self:
-            return self._pie
-        return self.context().pie
-
-    @pie.setter
-    def pie(self, value) -> None:
-        self._pie = value
-
-    @computed_field(repr=False)
-    @property
-    def canary(self):
-        if self._context == self:
-            return self._canary
-        return self.context().canary
-
-    @canary.setter
-    def canary(self, value) -> None:
-        self._canary = value
 
     # Note: Better to just recalculate this after deserialization
     # We don't have to do any hard analysis of figuring out where jumps/xrefs go
@@ -222,10 +134,36 @@ class Function(NativeCode):
 
 class Section(BaseModel):
     name: str
+    stype: str
     start: int
-    end: int
+    offset: int
+    size: int
+    entsize: int
+    link: int
+    info: int
+    align: int
 
-class Binary(NativeCode):
+    # flags
+    write: bool = False
+    alloc: bool = False
+    execute: bool = False
+    merge: bool = False
+    strings: bool = False
+    info_flag: bool = False
+    link_order:bool = False
+    extra_processing:bool = False
+    group: bool = False
+    tls:bool = False
+    compressed:bool = False
+    unknown: bool = False
+    os_specific:bool = False
+    exclude:bool = False
+    mbind:bool = False
+    large:bool = False
+    processor_specific:bool = False
+
+
+class Binary(BaseModel):
     '''
     This maps 1 to 1 of what you'd load into a disassembler (e.g., ELF, PE, MACH-O, Firmware Dump, Binary Blob)
     '''
@@ -233,22 +171,19 @@ class Binary(NativeCode):
     class NoDataException(Exception):
         pass
 
-    _context = None
-
     # Path to where the binary is stored
     _path: Path = None
     # The file contents of the binary
     _bytes: bytes = None
 
+    endianness: Optional[Endian] = None
+    architecture: Optional[str] = None
+    bitness: Optional[int] = None
     entrypoint: int = None
     os: str = None
-    abi: str = None
-
     sections: List[Section] = []
     dynamic_libs: Set[Binary] = set([])
-    
     functions: Set[Function] = set([])
-
     # Strings from String table
     # maybe use `$ strings` if not such structure exists in the binary?
     strings: Set[str] = set([])
@@ -281,7 +216,7 @@ class Binary(NativeCode):
     @cached_property
     def sha256(self) -> str:
         '''sha256 hex digest of the file'''
-        raise NotImplementedError
+        return hashlib.sha256(self.bytes()).hexdigest()
 
     @computed_field(repr=False)
     @property
@@ -362,16 +297,6 @@ class Binary(NativeCode):
 
         raise Binary.NoDataException("Binary Object has no Path or data")
 
-    # def entrypoint(self) -> int:
-    #     return None
-
-    # def os(self) -> str:
-    #     return None
-
-    # def abi(self) -> str:
-    #     return None
-
-    @computed_field(repr=False)
     @cached_property
     def _checksec(self) -> ELFChecksecData:
         fp = None
