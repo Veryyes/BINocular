@@ -3,6 +3,7 @@ from enum import Enum
 class Endian(Enum):
     LITTLE = 0
     BIG = 1
+    OTHER = 2
 
 # Not an ENUM; Just Macros
 X86 = "x86"

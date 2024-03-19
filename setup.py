@@ -8,7 +8,9 @@ setup(
     packages = ["binocular"],
     install_requires = [
         'rich',
-        'pydantic'
+        'pydantic',
+        'networkx',
+        'checksec-py',
     ],
     # entry_points={
     #     "console_scripts": ['']
