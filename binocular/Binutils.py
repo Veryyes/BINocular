@@ -50,7 +50,13 @@ class Binutils(Disassembler):
         self._loaded_bin = False
         self._bin = None
 
+        self._funcs_by_name = dict()
+        self._funcs_by_addr = dict()
+
         self.timeout = timeout
+
+        if not self.is_installed():
+            self.install()
 
     def is_installed(self) -> bool:
         tools = ["objdump", "readelf"]
@@ -73,6 +79,10 @@ class Binutils(Disassembler):
         self._bin._path=binary
 
         self._bin.functions = self._objdump(binary)
+        for f in self._bin.functions:
+            self._funcs_by_addr[f.address] = f
+            self._funcs_by_name[f.name] = f
+
         return self._bin
     
     def _run_proc(self, cmd:List[str]) -> Tuple[str, str]:
@@ -229,11 +239,19 @@ class Binutils(Disassembler):
         return funcs
 
             
-    def function(self, address:int):
-        raise NotImplementedError
+    def function(self, address:int, exact=True) -> Function:
+        if exact:
+            return self._funcs_by_addr.get(address, None)
 
-    def function_sym(self, symbol:str):
-        raise NotImplementedError
+        if address in self._funcs_by_addr:
+            return self.self._funcs_by_addr[address]
 
-    def functions(self):
-        raise NotImplementedError
+        addrs = [(abs(a - address), f) for a, f in self._funcs_by_addr.items()]
+        return min(addrs, key=lambda x: x[0])[1]
+            
+
+    def function_sym(self, symbol:str) -> Function:
+        return self._funcs_by_name.get(symbol, None)
+
+    def functions(self) -> List[Function]:
+        return self._bin.functions
