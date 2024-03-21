@@ -17,18 +17,16 @@ class Instruction(BaseModel):
     endianness: Optional[Endian] = None
     architecture: Optional[str] = None
     bitness: Optional[int] = None
+    address: Optional[int] = None
 
-    address: Optional[int]
     data: bytes
-    opcode: str
-    operands: List[str]
+    asm: Optional[str] = ""
+    operands: Optional[List[str]] = list()
+    comment: Optional[str] = ""
     
 
-    xref_to: List[int]
-    xref_from: List[int]
-
-    def __repr__(self):
-        raise NotImplementedError
+    xref_to: List[int] = list()
+    xref_from: List[int] = list()
 
     def __len__(self):
         return len(self.data)
@@ -46,13 +44,14 @@ class BasicBlock(BaseModel):
     endianness: Optional[Endian] = None
     architecture: Optional[str] = None
     bitness: Optional[int] = None
+    address: Optional[int] = None
 
-    instructions: List[Instruction]
-    is_prologue: bool
-    is_epilogue: bool
+    instructions: List[Instruction] = list()
+    is_prologue: Optional[bool] = False
+    is_epilogue: Optional[bool] = False
 
-    xref_to: List[int]
-    xref_from: List[int]
+    xref_to: List[int] = list()
+    xref_from: List[int] = list()
 
     _size_bytes: int = None
     pie:PIEType = None
@@ -60,11 +59,8 @@ class BasicBlock(BaseModel):
     # TODO Consider
     # next() -> return subsequent blocks
 
-    def __repr__(self):
-        raise NotImplementedError
-
     def __hash__(self):
-        raise hash(self.bytes)
+        return hash(self.bytes)
 
     def __len__(self):
         if self._size_bytes is None:
@@ -92,28 +88,24 @@ class Function(BaseModel):
     endianness: Optional[Endian] = None
     architecture: Optional[str] = None
     bitness: Optional[int] = None
-    pie:PIEType = None
-    canary:bool = None
-
+    address: Optional[int]
+    pie:Optional[PIEType] = None
+    canary:Optional[bool] = None
     name:str
-    basic_blocks: Set[BasicBlock]
-    prologue: BasicBlock
-    epilogue: BasicBlock # does this need to be a list?
+    basic_blocks: Set[BasicBlock] = set([])
+    prologue: Optional[BasicBlock] = None
+    epilogue: Optional[BasicBlock] = None # does this need to be a list?
     
-    xref_to: List[int]
-    xref_from: List[int]
-
-    
+    xref_to: Optional[List[int]] = list()
+    xref_from: Optional[List[int]] = list()
 
     # TODO CONSIDER:
     # get call args
     # get return type
 
-    def __repr__(self):
-        raise NotImplementedError
 
     def __hash__(self):
-        raise NotImplementedError
+        return hash(frozenset(self.basic_blocks))
     
     def __contains__(self, x:Union[BasicBlock, Instruction, bytes]):
         if isinstance(x, BasicBlock):
@@ -200,9 +192,6 @@ class Binary(BaseModel):
         obj._bytes = b
         return obj
 
-    # def __repr__(self):
-    #     raise NotImplementedError
-    
     def __hash__(self):
         return int(self.sha256, 16)
     
@@ -225,8 +214,8 @@ class Binary(BaseModel):
 
     @computed_field(repr=False)
     @property
-    def pie(self) -> str:
-        return self._checksec.pie.name
+    def pie(self) -> PIEType:
+        return self._checksec.pie
 
     @computed_field(repr=False)
     @property
@@ -235,8 +224,8 @@ class Binary(BaseModel):
 
     @computed_field(repr=False)
     @property
-    def relro(self) -> str:
-        return self._checksec.relro.name
+    def relro(self) -> RelroType:
+        return self._checksec.relro
 
     @computed_field(repr=False)
     @property

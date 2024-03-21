@@ -10,6 +10,7 @@ setup(
         'rich',
         'pydantic',
         'networkx',
+        'archinfo'
         'checksec-py',
     ],
     # entry_points={
