@@ -12,6 +12,9 @@ setup(
         'networkx',
         'archinfo'
         'checksec-py',
+        'GitPython',
+        'meson',
+        'rzpipe',
     ],
     # entry_points={
     #     "console_scripts": ['']

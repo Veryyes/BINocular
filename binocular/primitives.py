@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Union, Set, IO, Optional
+from typing import List, Union, Set, IO, Optional, Tuple
 from functools import cached_property
 from pathlib import Path
 import tempfile
@@ -7,22 +7,49 @@ import hashlib
 
 import networkx as nx
 from pydantic import BaseModel, computed_field
+from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 
-from .consts import Endian
+from .consts import Endian, BranchType, IL
 
-class Instruction(BaseModel):
-    '''Represents a single instruction'''
+@dataclass
+class IR:
+    lang_name: IL
+    data: str
 
+class NativeCode(BaseModel):
     endianness: Optional[Endian] = None
     architecture: Optional[str] = None
     bitness: Optional[int] = None
+
+    def __repr__(self) -> str:
+        fields = []
+        for f in self.model_fields.keys():
+            field = getattr(self, f)
+            if field is None:
+                continue
+
+            if isinstance(field, str):
+                fields.append(f"{f}={field}")
+            elif isinstance(field, bytes):
+                fields.append(f"{f}=0x{field.hex()}")
+            elif getattr(field, '__len__', None) is not None:
+                fields.append(f"len({f})={len(field)}")
+            else:
+                fields.append(f"{f}={field}")
+
+        return f"{self.__class__.__name__}({', '.join(fields)})"
+        
+
+class Instruction(NativeCode):
+    '''Represents a single instruction'''
     address: Optional[int] = None
 
     data: bytes
     asm: Optional[str] = ""
     operands: Optional[List[str]] = list()
     comment: Optional[str] = ""
+    ir: Optional[IR] = None
     
 
     xref_to: List[int] = list()
@@ -40,13 +67,12 @@ class Instruction(BaseModel):
     def __contains__(self, x:bytes):
         return x in self.data
 
-class BasicBlock(BaseModel): 
-    endianness: Optional[Endian] = None
-    architecture: Optional[str] = None
-    bitness: Optional[int] = None
+class BasicBlock(NativeCode): 
     address: Optional[int] = None
+    pie:PIEType = None
 
     instructions: List[Instruction] = list()
+    branches: Set[Tuple[BranchType, int]] = set([])
     is_prologue: Optional[bool] = False
     is_epilogue: Optional[bool] = False
 
@@ -54,7 +80,7 @@ class BasicBlock(BaseModel):
     xref_from: List[int] = list()
 
     _size_bytes: int = None
-    pie:PIEType = None
+    
 
     # TODO Consider
     # next() -> return subsequent blocks
@@ -84,10 +110,7 @@ class BasicBlock(BaseModel):
     def num_instructions(self):
         return len(self.instructions)
 
-class Function(BaseModel):
-    endianness: Optional[Endian] = None
-    architecture: Optional[str] = None
-    bitness: Optional[int] = None
+class Function(NativeCode):
     address: Optional[int]
     pie:Optional[PIEType] = None
     canary:Optional[bool] = None
@@ -96,13 +119,15 @@ class Function(BaseModel):
     prologue: Optional[BasicBlock] = None
     epilogue: Optional[BasicBlock] = None # does this need to be a list?
     
+    calls: Optional[Set[Function]] = set([])
+    callers: Optional[Set[Function]] = set([])
+
     xref_to: Optional[List[int]] = list()
     xref_from: Optional[List[int]] = list()
 
     # TODO CONSIDER:
     # get call args
     # get return type
-
 
     def __hash__(self):
         return hash(frozenset(self.basic_blocks))
@@ -155,7 +180,7 @@ class Section(BaseModel):
     processor_specific:bool = False
 
 
-class Binary(BaseModel):
+class Binary(NativeCode):
     '''
     This maps 1 to 1 of what you'd load into a disassembler (e.g., ELF, PE, MACH-O, Firmware Dump, Binary Blob)
     '''
@@ -168,9 +193,7 @@ class Binary(BaseModel):
     # The file contents of the binary
     _bytes: bytes = None
 
-    endianness: Optional[Endian] = None
-    architecture: Optional[str] = None
-    bitness: Optional[int] = None
+    filename: Optional[str] = None
     entrypoint: int = None
     os: str = None
     sections: List[Section] = []
@@ -201,6 +224,11 @@ class Binary(BaseModel):
         elif isinstance(x, BasicBlock) or isinstance(x, Instruction) or isinstance(x, bytes):
             return any([x in f for f in self.functions])
  
+    def set_path(self, path:Union[Path, str]):
+        if isinstance(path, str):
+            path = Path(path)
+        self._path = path
+
     @computed_field(repr=False)
     @cached_property
     def sha256(self) -> str:

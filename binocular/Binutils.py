@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Union, List, Tuple
+from typing import Union
+from collections.abc import Iterable
 from pathlib import Path
-import subprocess
 import shutil
 import string
 import re
@@ -9,11 +9,11 @@ import re
 from .disassembler import Disassembler
 from .primitives import Binary, Section, Function, BasicBlock, Instruction
 from .consts import Endian
+from .utils import run_proc
 
 class Binutils(Disassembler):
     '''Parse all the data of a blob using Binutil Binaries'''
     FUNC_PAT = re.compile(r'([0-9a-fA-F]+) <(\S+)>:')
-
 
     @classmethod
     def _readelf_parse_flag(cls, flag:str):
@@ -66,7 +66,7 @@ class Binutils(Disassembler):
         # TODO install binutils...
         raise NotImplementedError("Go install Binutils")
 
-    def load_binary(self, binary:Union[Path, str]) -> Binary:
+    def load_binary(self, binary:Union[Path, str]):
         if isinstance(binary, str):
             binary = Path(binary)
         if isinstance(binary, Path):
@@ -75,25 +75,14 @@ class Binutils(Disassembler):
 
         header_data = self._readelf_header(binary)
         sections = self._readelf_sections(binary)
-        self._bin = Binary(sections=sections, **header_data)
-        self._bin._path=binary
+        self._bin = Binary(filename=binary.name, sections=sections, **header_data)
+        self._bin.set_path(binary)
 
         self._bin.functions = self._objdump(binary)
         for f in self._bin.functions:
             self._funcs_by_addr[f.address] = f
             self._funcs_by_name[f.name] = f
-
-        return self._bin
     
-    def _run_proc(self, cmd:List[str]) -> Tuple[str, str]:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        try:
-            out, err = p.communicate(timeout=self.timeout)
-            return str(out, 'utf8'), str(err, 'utf8')
-        except TimeoutError:
-            p.kill()
-            raise Disassembler.FailedToLoadBinary
-
     def _readelf_header(self, bin_path:Path):
         props = {
             "endianness": None,
@@ -102,7 +91,7 @@ class Binutils(Disassembler):
             "entrypoint": None,
         }
 
-        out, _ = self._run_proc(["readelf", "-h", str(bin_path)])
+        out, _ = run_proc(["readelf", "-h", str(bin_path)], timeout=self.timeout)
         lines = out.split('\n')
         for l in lines:
             info = l.strip().split(":", 1)
@@ -127,7 +116,7 @@ class Binutils(Disassembler):
     def _readelf_sections(self, bin_path:Path):
         sections = list()
 
-        out, _ = self._run_proc(["readelf", "--sections", "-W", str(bin_path)])
+        out, _ = run_proc(["readelf", "--sections", "-W", str(bin_path)], timeout=self.timeout)
         lines = out.split("\n")
         lines = lines[5:-6]
         for l in lines:
@@ -161,7 +150,7 @@ class Binutils(Disassembler):
         curr_bb = None
 
         cmd = ["objdump", "-w", "-d", "-Mintel", str(bin_path)]
-        out, _ = self._run_proc(cmd)
+        out, _ = run_proc(cmd, timeout=self.timeout)
         lines = out.split("\n")[4:]
         for l in lines:
             if "Disassembly of section" in l:
@@ -237,21 +226,13 @@ class Binutils(Disassembler):
                     # )
                     # curr_bb = None
         return funcs
-
             
-    def function(self, address:int, exact=True) -> Function:
-        if exact:
-            return self._funcs_by_addr.get(address, None)
-
-        if address in self._funcs_by_addr:
-            return self.self._funcs_by_addr[address]
-
-        addrs = [(abs(a - address), f) for a, f in self._funcs_by_addr.items()]
-        return min(addrs, key=lambda x: x[0])[1]
+    def function(self, address:int) -> Function:
+        return self._funcs_by_addr.get(address, None)
             
-
     def function_sym(self, symbol:str) -> Function:
         return self._funcs_by_name.get(symbol, None)
 
-    def functions(self) -> List[Function]:
-        return self._bin.functions
+    def functions(self) -> Iterable[Function]:
+        for f in self._bin.functions:
+            yield f
