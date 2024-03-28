@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
-from .primitives import Function
+from .primitives import Function, Binary
 
 # This will be constantly changing until we have a few examples in
 class Disassembler(ABC):
@@ -27,8 +27,13 @@ class Disassembler(ABC):
     #     raise NotImplementedError
 
     @abstractmethod
-    def load_binary(self, path):
+    def load(self, path):
         '''Load a binary into the disassembler and trigger any default analysis'''
+        raise NotImplementedError
+
+    @abstractmethod
+    def binary(self) -> Binary:
+        '''Returns a Binary object of the loaded binary'''
         raise NotImplementedError
 
 

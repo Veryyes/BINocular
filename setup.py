@@ -12,6 +12,7 @@ setup(
         'networkx',
         'archinfo'
         'checksec-py',
+        'SQLAlchemy',
         'GitPython',
         'meson',
         'rzpipe',

@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import List, Union
 from collections.abc import Iterable
 from pathlib import Path
+from functools import lru_cache
 import os
 import shutil
 import pkgutil
@@ -90,13 +91,12 @@ class Rizin(Disassembler):
             section_flags[prop_names.get(f, f)] = True
         return section_flags
 
-    def load_binary(self, path:Union[Path, str]):
+    def load(self, path:Union[Path, str]):
         if isinstance(path, Path):
             path = str(path)
 
         if not os.path.exists(path) or os.path.isdir(path):
             raise FileNotFoundError
-
 
         if self.rizin_home is not None:
             self._pipe = rzpipe.open(path, rizin_home=self.rizin_home)
@@ -123,6 +123,7 @@ class Rizin(Disassembler):
 
         self._bin = Binary(filename=os.path.basename(path), **props)
         self._bin.set_path(path)
+        self._bin.set_disassembler(self)
 
         # Sections
         for s in self._pipe.cmdj('iSj'):
@@ -149,94 +150,81 @@ class Rizin(Disassembler):
         for l in self._pipe.cmdj("ilj"):
             self._bin.dynamic_libs.add(l)
 
-        # Functions
-        for f in self._pipe.cmdj("aflj"):
-            func = Function(
+    def binary(self):
+        return self._bin
+
+    @lru_cache
+    def function(self, address:int) -> Function:
+        self._pipe.cmd(f"s {address}")
+        addr = self._pipe.cmdj("afoj")['address']
+        signature = self._pipe.cmdj('afsj')
+        argv = [(arg['type'], arg['name']) for arg in  signature['args']]
+        func = Function(
+            endianness=self._bin.endianness,
+            architecture=self._bin.architecture,
+            bitness=self._bin.bitness,
+            pie=self._bin.pie,
+            canary=self._bin.canary,
+            address=addr,
+            name=signature['name'],
+            argv=argv,
+            return_type=signature["ret"]
+        )
+
+        # For each basic block in the function
+        for b in self._pipe.cmdj('afbj'):
+            bb = BasicBlock(
                 endianness=self._bin.endianness,
                 architecture=self._bin.architecture,
                 bitness=self._bin.bitness,
-                pie=self._bin.pie,
-                canary=self._bin.canary,
-                address=f['offset'],
-                name=f['name'],
+                address=b['addr']
             )
-            self._pipe.cmd(f"s {f['offset']}")
-            
-            # For each basic block in the function
-            for b in self._pipe.cmdj('afbj'):
-                bb = BasicBlock(
+
+            if b.get('fail', None) is not None:
+                bb.branches.add((BranchType.FalseBranch, b['fail']))
+                if b.get('jump', None) is not None:
+                    bb.branches.add((BranchType.TrueBranch, b['jump']))
+
+            elif b.get('jump', None) is not None:
+                bb.branches.add((BranchType.UnconditionalBranch, b['jump']))
+
+            # Seek to basic block
+            self._pipe.cmd(f"s {b['addr']}")
+
+            # For each Instruction in the basic block
+            for i in self._pipe.cmdj("pdbj"):
+                instr = Instruction(
                     endianness=self._bin.endianness,
                     architecture=self._bin.architecture,
                     bitness=self._bin.bitness,
-                    address=b['addr']
+                    address=i['offset'],
+                    data=bytes.fromhex(i['bytes'])
                 )
-
-                if b.get('fail', None) is not None:
-                    bb.branches.add((BranchType.FalseBranch, b['fail']))
-                    if b.get('jump', None) is not None:
-                        bb.branches.add((BranchType.TrueBranch, b['jump']))
-
-                elif b.get('jump', None) is not None:
-                    bb.branches.add((BranchType.UnconditionalBranch, b['jump']))
-
-                # Seek to basic block
-                self._pipe.cmd(f"s {b['addr']}")
-
-                # For each Instruction in the basic block
-                for i in self._pipe.cmdj("pdbj"):
-                    
-                    instr = Instruction(
-                        endianness=self._bin.endianness,
-                        architecture=self._bin.architecture,
-                        bitness=self._bin.bitness,
-                        address=i['offset'],
-                        data=bytes.fromhex(i['bytes'])
-                    )
-                    
-                    if i.get('disasm', None) is not None:
-                        instr.asm = i['disasm']
-
-                    if i.get('comment', None) is not None:
-                        instr.comment = str(binascii.a2b_base64(i['comment']), 'utf8')
-
-                    ir = i.get('esil', None)
-                    if ir is not None and len(ir) > 0:
-                        instr.ir = IR(IL.ESIL, ir)
                 
-                    bb.instructions.append(instr)
-                
-                func.basic_blocks.add(bb)
+                if i.get('disasm', None) is not None:
+                    instr.asm = i['disasm']
 
-            # Iterate over all the basic blocks again to connect the jumps between them
-            # for b in basic_blocks:
-            #     bb = bb_cache[b['addr']]
+                if i.get('comment', None) is not None:
+                    instr.comment = str(binascii.a2b_base64(i['comment']), 'utf8')
 
-            #     if b.get('jump', None) is not None:
-            #         try:
-            #             bb.branches.add((BranchType.TrueBranch, bb_cache[b['jump']]))
-            #         except:
-            #             import IPython
-            #             IPython.embed()
-
-            #     if b.get('fail', None) is not None:
-            #         bb.branches.add((BranchType.FalseBranch, bb_cache[b['fail']]))
-
-            #     # insert them to the function
-            #     func.basic_blocks.add(bb)
-
-            self._bin.functions.add(func)
-
-            self._funcs_by_name[func.name] = func
-            self._funcs_by_addr[func.address] = func
+                ir = i.get('esil', None)
+                if ir is not None and len(ir) > 0:
+                    instr.ir = IR(IL.ESIL, ir)
             
-
-    def function(self, address:int) -> Function:
-        return self._funcs_by_addr.get(address, None)
+                bb.instructions.append(instr)
             
+            func.basic_blocks.add(bb)
+        return func
+            
+    @lru_cache
     def function_sym(self, symbol:str) -> Function:
-        return self._funcs_by_name.get(symbol, None)
+        for f in self._pipe.cmdj("aflj"):
+            name = f['name']
+            if symbol == name:
+                return self.function(f['offset'])
 
     def functions(self) -> Iterable[Function]:
-        for f in self._bin.functions:
-            yield f
-        
+        # Functions
+        for f in self._pipe.cmdj("aflj"):
+            func = self.function(f['offset'])
+            yield func

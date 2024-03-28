@@ -11,6 +11,7 @@ from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 
 from .consts import Endian, BranchType, IL
+# from .disassembler import Disassembler
 
 @dataclass
 class IR:
@@ -114,7 +115,10 @@ class Function(NativeCode):
     address: Optional[int]
     pie:Optional[PIEType] = None
     canary:Optional[bool] = None
-    name:str
+    name:str = None
+    return_type:str = None
+    argv: List[Tuple[str, str]] = None
+
     basic_blocks: Set[BasicBlock] = set([])
     prologue: Optional[BasicBlock] = None
     epilogue: Optional[BasicBlock] = None # does this need to be a list?
@@ -124,10 +128,6 @@ class Function(NativeCode):
 
     xref_to: Optional[List[int]] = list()
     xref_from: Optional[List[int]] = list()
-
-    # TODO CONSIDER:
-    # get call args
-    # get return type
 
     def __hash__(self):
         return hash(frozenset(self.basic_blocks))
@@ -193,12 +193,19 @@ class Binary(NativeCode):
     # The file contents of the binary
     _bytes: bytes = None
 
+    _functions: Set[Function] = None
+
+    # A disassembler associated with this binary
+    # Properties like `functions` is lazy loaded and requires a disassember
+    # to pull that information out 
+    _disassembler: 'Disassembler'
+
     filename: Optional[str] = None
     entrypoint: int = None
     os: str = None
     sections: List[Section] = []
     dynamic_libs: Set[Binary] = set([])
-    functions: Set[Function] = set([])
+    
     # Strings from String table
     # maybe use `$ strings` if not such structure exists in the binary?
     strings: Set[str] = set([])
@@ -228,6 +235,9 @@ class Binary(NativeCode):
         if isinstance(path, str):
             path = Path(path)
         self._path = path
+
+    def set_disassembler(self, d:'Disassembler'):
+        self._disassembler = d
 
     @computed_field(repr=False)
     @cached_property
@@ -290,6 +300,19 @@ class Binary(NativeCode):
     def fortify_score(self) -> int:
         return self._checksec.fortify_score
 
+    @computed_field(repr=True)
+    @property
+    def functions(self) -> Set[Function]:
+        if self._functions is None:
+            if self._disassembler is None:
+                # log warning?
+                return None
+            else:
+                self._functions = set(self._disassembler.functions())
+
+        return self._functions       
+    
+    
     def bytes(self) -> bytes:
         '''return the raw bytes of the binary'''
         if self._bytes is not None:
