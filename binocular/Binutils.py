@@ -130,7 +130,7 @@ class Binutils(Disassembler):
 
             s = Section(
                 name=name,
-                stype=stype,
+                type=stype,
                 start=int(address, 16),
                 offset=int(offset, 16),
                 size=int(size, 16),

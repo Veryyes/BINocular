@@ -128,11 +128,17 @@ class Rizin(Disassembler):
         # Sections
         for s in self._pipe.cmdj('iSj'):
             if len(s['name']) > 0:
+                
+                # Invalid offset sizes being set to 0xf * 16
+                offset = s['vaddr']
+                if offset == 18446744073709551615:
+                    offset = -1
+
                 sec = Section(
                     name = s['name'],
-                    stype = s['type'],
+                    type = s['type'],
                     start = s['paddr'],
-                    offset = s['vaddr'],
+                    offset = offset,
                     size = s['size'],
                     entsize = 0,
                     link = 0,
@@ -177,6 +183,7 @@ class Rizin(Disassembler):
                 endianness=self._bin.endianness,
                 architecture=self._bin.architecture,
                 bitness=self._bin.bitness,
+                pie=self._bin.pie,
                 address=b['addr']
             )
 

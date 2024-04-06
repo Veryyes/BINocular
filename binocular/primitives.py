@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import List, Union, Set, IO, Optional, Tuple
 from functools import cached_property
 from pathlib import Path
@@ -11,7 +12,6 @@ from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 
 from .consts import Endian, BranchType, IL
-# from .disassembler import Disassembler
 
 @dataclass
 class IR:
@@ -151,7 +151,7 @@ class Function(NativeCode):
 
 class Section(BaseModel):
     name: str
-    stype: str
+    type: str
     start: int
     offset: int
     size: int
@@ -178,7 +178,6 @@ class Section(BaseModel):
     mbind:bool = False
     large:bool = False
     processor_specific:bool = False
-
 
 class Binary(NativeCode):
     '''
@@ -310,7 +309,7 @@ class Binary(NativeCode):
             else:
                 self._functions = set(self._disassembler.functions())
 
-        return self._functions       
+        return self._functions
     
     
     def bytes(self) -> bytes:
