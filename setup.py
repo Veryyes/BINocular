@@ -16,6 +16,7 @@ setup(
         'GitPython',
         'meson',
         'rzpipe',
+        'pyhidra',
     ],
     # entry_points={
     #     "console_scripts": ['']

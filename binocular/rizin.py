@@ -49,19 +49,19 @@ class Rizin(Disassembler):
         
         return sys_install or local_install
 
-    def install(self, directory=None):
+    def install(self, install_dir=None):
         print("Installing Rizin")
 
-        if directory is None:
-            directory = Rizin.DEFAULT_INSTALL
+        if install_dir is None:
+            install_dir = Rizin.DEFAULT_INSTALL
 
-        os.makedirs(directory, exist_ok=True)
-        print(f"Cloning Rizin to: {directory}")
+        os.makedirs(install_dir, exist_ok=True)
+        print(f"Cloning Rizin to: {install_dir}")
         try:
-            repo = Repo.clone_from(Rizin.GIT_REPO, directory)
+            repo = Repo.clone_from(Rizin.GIT_REPO, install_dir)
         except git.GitCommandError:
             print("Rizin Already Cloned")
-            repo = Repo(directory)
+            repo = Repo(install_dir)
 
         # Lock in to Version 0.7.2 for now
         repo.git.checkout("87add99")
@@ -73,7 +73,7 @@ class Rizin(Disassembler):
 
         for cmd in cmds:
             print(f"$ {' '.join(cmd)}")
-            out, err = run_proc(cmd=cmd, timeout=None, cwd=directory)
+            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
             print(out)
             print(err)
 
