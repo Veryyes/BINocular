@@ -202,8 +202,9 @@ class Binary(NativeCode):
     filename: Optional[str] = None
     entrypoint: int = None
     os: str = None
+    # TODO base_addr:int = None
     sections: List[Section] = []
-    dynamic_libs: Set[Binary] = set([])
+    dynamic_libs: Set[str] = set([])
     
     # Strings from String table
     # maybe use `$ strings` if not such structure exists in the binary?
