@@ -13,6 +13,8 @@ setup(
         'archinfo'
         'checksec-py',
         'SQLAlchemy',
+        'archinfo',
+        'pyvex',
         'GitPython',
         'meson',
         'rzpipe',

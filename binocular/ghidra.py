@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections.abc import Iterable
+from typing import Union
 import pkgutil
 import os
 import tempfile
@@ -11,8 +12,8 @@ from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
 from pyhidra.core import _setup_project, _analyze_program
 
 from .disassembler import Disassembler
-from .primitives import Binary, Section, Function, BasicBlock, Instruction, IR
-from .consts import Endian
+from .primitives import Binary, Section, Function, BasicBlock, Instruction, IR, FunctionSource
+from .consts import Endian, IL
 
 class Ghidra(Disassembler):
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
@@ -35,10 +36,11 @@ class Ghidra(Disassembler):
             self.ghidra_home = ghidra_home
 
         self.save_on_close = save_on_close
+        self.decomp_timeout = 60
 
     def __enter__(self):
         if not PyhidraLauncher.has_launched():
-            HeadlessPyhidraLauncher(install_dir=self.ghidra_home).start()
+            HeadlessPyhidraLauncher(install_dir=self.ghidra_home,verbose=False).start()
         return self
 
     def __exit__(self, type, value, tb):
@@ -90,7 +92,10 @@ class Ghidra(Disassembler):
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.program.flatapi import FlatProgramAPI
         from ghidra.program.util import DefinedDataIterator
-        
+        from ghidra.app.decompiler import DecompInterface, DecompileOptions
+        from ghidra.util.task import ConsoleTaskMonitor
+        from ghidra.program.model.block import BasicBlockModel
+
         self.project, self.program = _setup_project(
             path,
             self.project_location,
@@ -127,6 +132,12 @@ class Ghidra(Disassembler):
         self.fm = self.program.getFunctionManager()
         self.st = self.program.getSymbolTable()
         self.lang = self.program.getLanguage()
+        self.bb_model = BasicBlockModel(self.program)
+        self.listing = self.program.getListing()
+        self.monitor = ConsoleTaskMonitor()
+        self.decomp = DecompInterface()
+        self.decomp.setOptions(DecompileOptions())
+        self.decomp.openProgram(self.program)
 
         lang_data = self.lang.getLanguageDescription()
         
@@ -163,9 +174,17 @@ class Ghidra(Disassembler):
         return self.program.getAddressFactory().getDefaultAddressSpace().getAddress(offset)
 
     def _convert_func(self, f):
-        # import IPython
-        # IPython.embed()
-        return Function(
+        res = self.decomp.decompileFunction(f, self.decomp_timeout, self.monitor)
+        high_func = res.getHighFunction()
+        proto = high_func.getFunctionPrototype()
+        
+        decomp = res.getDecompiledFunction().getC()
+        dsrc = FunctionSource(
+            decompiled=True,
+            source = decomp
+        )
+
+        func = Function(
             endianness=self._bin.endianness,
             architecture=self._bin.architecture,
             bitness=self._bin.bitness,
@@ -173,17 +192,104 @@ class Ghidra(Disassembler):
             canary=self._bin.canary,
             address=f.getEntryPoint().getOffset(),
             name=f.getName(),
-            return_type=str(f.getReturnType())
-            
+            return_type=str(proto.getReturnType()),
+            argv = [(str(proto.getParam(i).getDataType()), str(proto.getParam(i).getName())) for i in range(proto.getNumParams())]
         )
+        func.source.append(dsrc)
+
+        blocks = self.bb_model.getCodeBlocksContaining(f.getBody(), self.monitor)
+        history = set()
+        while(blocks.hasNext()):
+            bb = blocks.next()
+            bb_addr = bb.getFirstStartAddress().getOffset()
+            if bb_addr in history:
+                continue
+
+            history.add(bb_addr)
+            basicblock = BasicBlock(
+                endianness=self._bin.endianness,
+                architecture=self._bin.architecture,
+                bitness=self._bin.bitness,
+                pie=self._bin.pie,
+                address=bb_addr,
+            )
+
+            curr_instr = self.listing.getInstructionAt(bb.getFirstStartAddress())
+            while (bb.contains(curr_instr.getAddress())):
+                pcodes = list(curr_instr.getPCode())
+                ir = IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
+                instr = Instruction(
+                        endianness=self._bin.endianness,
+                        architecture=self._bin.architecture,
+                        bitness=self._bin.bitness,
+                        address=curr_instr.getAddress().getOffset(), 
+                        data=bytes(curr_instr.getBytes()),
+                        asm=curr_instr.getMnemonicString(),
+                        ir=ir,
+                    )
+                basicblock.instructions.append(instr)
+                
+                curr_instr = curr_instr.getNext()
+
+        return func
 
     def function(self, address: int) -> Function:
         addr = self._mk_addr(address)
         return self._convert_func(self.fm.getFunctionAt(addr))
 
     def function_sym(self, symbol: str) -> Function:
-        pass
+        # TODO add error handling
+        return self._convert_func(self.flat_api.getGlobalFunctions(symbol)[0])
 
     def functions(self) -> Iterable[Function]:
         for f in self.fm.getFunctions(True):
             yield self._convert_func(f)
+
+    def basic_block(self, address: int) -> BasicBlock:
+        if isinstance(address, int):
+            addr = self._mk_addr(address)
+            
+        bb = self.bb_model.getFirstCodeBlockContaining(addr)
+        basicblock = BasicBlock(
+            endianness=self._bin.endianness,
+            architecture=self._bin.architecture,
+            bitness=self._bin.bitness,
+            pie=self._bin.pie,
+            address=address.getOffset(),
+        )
+
+        curr_instr = self.listing.getInstructionAt(self._mk_addr(address))
+        while (bb.contains(curr_instr.getAddress())):
+            pcodes = list(curr_instr.getPCode())
+            ir = IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
+            instr = Instruction(
+                endianness=self._bin.endianness,
+                architecture=self._bin.architecture,
+                bitness=self._bin.bitness,
+                address=curr_instr.getAddress().getOffset(), 
+                data=bytes(curr_instr.getBytes()),
+                asm=curr_instr.getMnemonicString(),
+                ir=ir,
+            )
+            basicblock.instructions.append(instr)
+            
+            curr_instr = curr_instr.getNext()
+
+    def instruction(self, address: int) -> Instruction:
+        if isinstance(address, int):
+            addr = self._mk_addr(address)
+        
+        curr_instr = self.listing.getInstructionAt(addr)
+        pcodes = list(curr_instr.getPCode())
+        ir = IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
+        instr = Instruction(
+            endianness=self._bin.endianness,
+            architecture=self._bin.architecture,
+            bitness=self._bin.bitness,
+            address=curr_instr.getAddress().getOffset(), 
+            data=bytes(curr_instr.getBytes()),
+            asm=curr_instr.getMnemonicString(),
+            ir=ir,
+        )
+        
+        return instr

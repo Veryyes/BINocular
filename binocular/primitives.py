@@ -5,6 +5,7 @@ from functools import cached_property
 from pathlib import Path
 import tempfile
 import hashlib
+import pyvex
 
 import networkx as nx
 from pydantic import BaseModel, computed_field
@@ -12,6 +13,7 @@ from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 
 from .consts import Endian, BranchType, IL
+from .utils import str2archinfo
 
 @dataclass
 class IR:
@@ -68,6 +70,14 @@ class Instruction(NativeCode):
     def __contains__(self, x:bytes):
         return x in self.data
 
+    def vex(self):
+        address = self.address
+        if address is None:
+            address = 0
+
+        il = pyvex.lift(self.data, address, str2archinfo(self.architecture))
+        return IR(lang_name=IL.VEX, data=";".join([stmt.pp() for stmt in il.statements]))
+
 class BasicBlock(NativeCode): 
     address: Optional[int] = None
     pie:PIEType = None
@@ -111,6 +121,12 @@ class BasicBlock(NativeCode):
     def num_instructions(self):
         return len(self.instructions)
 
+    def vex(self):
+        bb_ir = []
+        for instr in self.instructions:
+            bb_ir.append(instr.vex().data)
+        return IR(lang_name=IL, data=";".join(bb_ir))
+
 class Function(NativeCode):
     address: Optional[int]
     pie:Optional[PIEType] = None
@@ -118,6 +134,7 @@ class Function(NativeCode):
     name:str = None
     return_type:str = None
     argv: List[Tuple[str, str]] = None
+    source: List[FunctionSource] = list()
 
     basic_blocks: Set[BasicBlock] = set([])
     prologue: Optional[BasicBlock] = None
@@ -148,6 +165,14 @@ class Function(NativeCode):
     @cached_property
     def cfg(self) -> nx.MultiDiGraph:
         raise NotImplementedError
+
+    def decompile(self):
+        pass
+
+class FunctionSource:
+    language:str = "C"
+    decompiled:bool
+    source: str
 
 class Section(BaseModel):
     name: str

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
-from .primitives import Function, Binary
+from .primitives import Function, Binary, BasicBlock, Instruction
 
 # This will be constantly changing until we have a few examples in
 class Disassembler(ABC):
@@ -21,10 +21,6 @@ class Disassembler(ABC):
     def install(self, install_dir=None):
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         raise NotImplementedError
-
-    # @abstractmethod
-    # def launch(self):
-    #     raise NotImplementedError
 
     @abstractmethod
     def load(self, path):
@@ -53,3 +49,18 @@ class Disassembler(ABC):
     def functions(self) -> Iterable[Function]:
         raise NotImplementedError
 
+    ################
+    # Basic Blocks #
+    ################
+
+    @abstractmethod
+    def basic_block(self, address:int) -> BasicBlock:
+        raise NotImplementedError
+
+    ################
+    # Instructions #
+    ################
+
+    @abstractmethod
+    def instruction(self, address:int) -> Instruction:
+        raise NotImplementedError

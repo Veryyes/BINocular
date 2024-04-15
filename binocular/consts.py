@@ -12,7 +12,9 @@ class BranchType(Enum):
     IndirectBranch = 3
 
 class IL(Enum):
-    ESIL = 0
+    VEX = 0
+    ESIL = 1
+    PCODE = 2
 
 # Not an ENUM; Just Macros
 X86 = "x86"

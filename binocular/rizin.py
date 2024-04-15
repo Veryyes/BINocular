@@ -179,46 +179,7 @@ class Rizin(Disassembler):
 
         # For each basic block in the function
         for b in self._pipe.cmdj('afbj'):
-            bb = BasicBlock(
-                endianness=self._bin.endianness,
-                architecture=self._bin.architecture,
-                bitness=self._bin.bitness,
-                pie=self._bin.pie,
-                address=b['addr']
-            )
-
-            if b.get('fail', None) is not None:
-                bb.branches.add((BranchType.FalseBranch, b['fail']))
-                if b.get('jump', None) is not None:
-                    bb.branches.add((BranchType.TrueBranch, b['jump']))
-
-            elif b.get('jump', None) is not None:
-                bb.branches.add((BranchType.UnconditionalBranch, b['jump']))
-
-            # Seek to basic block
-            self._pipe.cmd(f"s {b['addr']}")
-
-            # For each Instruction in the basic block
-            for i in self._pipe.cmdj("pdbj"):
-                instr = Instruction(
-                    endianness=self._bin.endianness,
-                    architecture=self._bin.architecture,
-                    bitness=self._bin.bitness,
-                    address=i['offset'],
-                    data=bytes.fromhex(i['bytes'])
-                )
-                
-                if i.get('disasm', None) is not None:
-                    instr.asm = i['disasm']
-
-                if i.get('comment', None) is not None:
-                    instr.comment = str(binascii.a2b_base64(i['comment']), 'utf8')
-
-                ir = i.get('esil', None)
-                if ir is not None and len(ir) > 0:
-                    instr.ir = IR(IL.ESIL, ir)
-            
-                bb.instructions.append(instr)
+            bb = self.basic_block(b['addr'])
             
             func.basic_blocks.add(bb)
         return func
@@ -235,3 +196,46 @@ class Rizin(Disassembler):
         for f in self._pipe.cmdj("aflj"):
             func = self.function(f['offset'])
             yield func
+
+    def basic_block(self, address: int) -> BasicBlock:
+        self._pipe.cmd(f"s {address}")
+        bb_data = self._pipe.cmdj(f"afbij")
+        bb = BasicBlock(
+            endianness=self._bin.endianness,
+            architecture=self._bin.architecture,
+            bitness=self._bin.bitness,
+            pie=self._bin.pie,
+            address=bb_data['addr']
+        )
+
+        for i in self._pipe.cmdj("pdbj"):
+            addr = i['offset']
+            instr = self.instruction(addr)
+        
+            bb.instructions.append(instr)
+
+        return bb
+
+    def instruction(self, address: int) -> Instruction:
+        self._pipe.cmd(f"s {address}")
+
+        instr_data = self._pipe.cmdj(f"pdj 1")
+        instr = Instruction(
+            endianness=self._bin.endianness,
+            architecture=self._bin.architecture,
+            bitness=self._bin.bitness,
+            address=instr_data['offset'],
+            data=bytes.fromhex(instr_data['bytes'])
+        )
+        
+        if instr.get('disasm', None) is not None:
+            instr.asm = instr['disasm']
+
+        if instr.get('comment', None) is not None:
+            instr.comment = str(binascii.a2b_base64(instr['comment']), 'utf8')
+
+        ir = instr.get('esil', None)
+        if ir is not None and len(ir) > 0:
+            instr.ir = IR(IL.ESIL, ir)
+
+        return instr
