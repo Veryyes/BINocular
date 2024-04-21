@@ -1,17 +1,25 @@
 from __future__ import annotations
 
-from typing import List, Union, Set, IO, Optional, Tuple
+from typing import List, Union, Set, IO, Optional, Tuple, Iterable
 from functools import cached_property
 from pathlib import Path
+import os
 import tempfile
 import hashlib
-import pyvex
 
+
+import rich
 import networkx as nx
 from pydantic import BaseModel, computed_field
 from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
+from sqlalchemy.engine.base import Engine
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+import pyvex
 
+
+from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM
 from .consts import Endian, BranchType, IL
 from .utils import str2archinfo
 
@@ -19,6 +27,27 @@ from .utils import str2archinfo
 class IR:
     lang_name: IL
     data: str
+
+class NoDBException(Exception):
+    pass
+
+class Backend:
+    engine:Engine = None
+
+    @classmethod
+    def set_engine(cls, db_uri:str) -> Engine:
+        if Backend.engine is None:
+            Backend.engine = create_engine(db_uri)
+            Base.metadata.create_all(Backend.engine)
+        
+        return Backend.engine
+
+    def __init__(self, disassembler: 'Disassembler'=None): #, db_uri:str=None):
+        self.disassembler = disassembler
+        
+    @property
+    def db(self) -> Engine:
+        return Backend.engine
 
 class NativeCode(BaseModel):
     endianness: Optional[Endian] = None
@@ -42,21 +71,44 @@ class NativeCode(BaseModel):
                 fields.append(f"{f}={field}")
 
         return f"{self.__class__.__name__}({', '.join(fields)})"
-        
 
 class Instruction(NativeCode):
     '''Represents a single instruction'''
-    address: Optional[int] = None
+    _backend: Backend = Backend()
 
+    address: Optional[int] = None
     data: bytes
     asm: Optional[str] = ""
-    operands: Optional[List[str]] = list()
+    # TODO make computed
+    # operands: Optional[List[str]] = list()
     comment: Optional[str] = ""
     ir: Optional[IR] = None
-    
 
     xref_to: List[int] = list()
     xref_from: List[int] = list()
+
+    @classmethod
+    def from_orm(cls, orm):
+        instruction = cls(
+            endianness=orm.endianness,
+            architecture=orm.architecture,
+            bitness=orm.bitness,
+            address = orm.address,
+            data=orm.bytes,
+            asm=orm.asm,
+            comment=orm.comment
+        )
+        
+        if len(orm.ir) > 0:
+            # TODO for now, just pick the first one
+            ir_data = orm.ir[0]
+            ir = IR(
+                lang_name=ir_data.lang,
+                data=ir_data.data
+            )
+            instruction.ir = ir
+        
+        return instruction
 
     def __len__(self):
         return len(self.data)
@@ -70,6 +122,33 @@ class Instruction(NativeCode):
     def __contains__(self, x:bytes):
         return x in self.data
 
+    def orm(self):
+        i = InstructionORM(
+            endianness=self.endianness,
+            architecture=self.architecture,
+            bitness=self.bitness,
+            address=self.address,
+            bytes = self.data,
+            asm=self.asm,
+            comment=self.comment,
+        )
+
+        ir = None
+        if self.ir is not None:
+            ir = IR_ORM(
+                lang=self.ir.lang_name,
+                data=self.ir.data,
+                instruction=i
+            )
+            i.ir.append(ir)
+
+        return i, ir
+
+    def db_add(self, session:Session):
+        instr, ir = self.orm()
+        session.add(instr)
+        session.add(ir)
+
     def vex(self):
         address = self.address
         if address is None:
@@ -79,6 +158,8 @@ class Instruction(NativeCode):
         return IR(lang_name=IL.VEX, data=";".join([stmt.pp() for stmt in il.statements]))
 
 class BasicBlock(NativeCode): 
+    _backend: Backend = Backend()
+
     address: Optional[int] = None
     pie:PIEType = None
 
@@ -92,6 +173,21 @@ class BasicBlock(NativeCode):
 
     _size_bytes: int = None
     
+    @classmethod
+    def from_orm(cls, orm):
+        bb = cls(
+            architecture=orm.architecture,
+            endianness=orm.endianness,
+            bitness=orm.bitness,
+            pie=orm.pie,
+        )
+
+        for instr_orm in orm.instructions:
+            instr = Instruction.from_orm(instr_orm)
+            bb.instructions.append(instr)
+
+        return bb
+
 
     # TODO Consider
     # next() -> return subsequent blocks
@@ -111,6 +207,9 @@ class BasicBlock(NativeCode):
             return x in self.bytes
         raise TypeError
 
+    def set_disassembler(self, disassembler:"Disassembler"):
+        self._backend.disassembler=disassembler
+
     @cached_property
     def bytes(self) -> bytes:
         b = b''
@@ -127,16 +226,48 @@ class BasicBlock(NativeCode):
             bb_ir.append(instr.vex().data)
         return IR(lang_name=IL, data=";".join(bb_ir))
 
+    # TODO ask disassembler first, otherwise default to vex
+    def ir(self):
+        return self.vex()
+
+    def orm(self):
+        bb = BasicBlockORM(
+            address=self.address,
+            endianness=self.endianness,
+            architecture=self.architecture,
+            bitness=self.bitness,
+            pie=self.pie,
+            size=len(self),
+        )
+
+        for instr in self.instructions:
+            instr_orm, _ = instr.orm()
+            bb.instructions.append(instr_orm)
+            instr_orm.basic_block=bb
+        
+        return bb
+
+    def db_add(self, session:Session):
+        bb = self.orm()
+        session.add(bb)
+        for instr in bb.instructions:
+            session.add(instr)
+            if instr.ir is not None:
+                # session.add(instr.ir)
+                [session.add(ir) for ir in instr.ir]
+
 class Function(NativeCode):
-    address: Optional[int]
+    _backend: Backend = Backend()
+
+    address: Optional[int] = None
     pie:Optional[PIEType] = None
     canary:Optional[bool] = None
-    name:str = None
-    return_type:str = None
+    names:Optional[List[str]] = None
+    return_type:Optional[str] = None
     argv: List[Tuple[str, str]] = None
-    source: List[FunctionSource] = list()
+    sources: Set[FunctionSource] = set([])
 
-    basic_blocks: Set[BasicBlock] = set([])
+    basic_blocks: Optional[Set[BasicBlock]] = set([])
     prologue: Optional[BasicBlock] = None
     epilogue: Optional[BasicBlock] = None # does this need to be a list?
     
@@ -145,6 +276,28 @@ class Function(NativeCode):
 
     xref_to: Optional[List[int]] = list()
     xref_from: Optional[List[int]] = list()
+
+    @classmethod
+    def from_orm(cls, orm):
+        f = cls(
+            names=[n.name for n in orm.names],
+            architecture=orm.architecture,
+            endianness=orm.endianness,
+            bitness=orm.bitness,
+            pie=orm.pie,
+            canary=orm.canary,
+            return_type=orm.return_type,
+            argv=[tuple(arg.strip().rsplit(" ", 1)) for arg in orm.argv.split(",")],
+        )
+
+        # TODO basic blocks
+        for bb in orm.basic_blocks:
+            f.basic_blocks.add(BasicBlock.from_orm(bb))
+
+        for src_f in orm.sources:
+            f.sources.add(FunctionSource.from_orm(src_f))
+
+        return f
 
     def __hash__(self):
         return hash(frozenset(self.basic_blocks))
@@ -166,14 +319,108 @@ class Function(NativeCode):
     def cfg(self) -> nx.MultiDiGraph:
         raise NotImplementedError
 
-    def decompile(self):
-        pass
+    # @computed_field(repr=False)
+    # @cached_property
+    # def decompile(self) -> FunctionSource:
+    #     pass
 
-class FunctionSource:
-    language:str = "C"
+    def set_disassembler(self, disassembler:"Disassembler"):
+        self._backend.disassembler=disassembler
+
+    def orm(self):
+        names = self.names
+        if names is None:
+            names = list()
+
+        func = NativeFunctionORM(
+            names=[NameORM(name=n) for n in names],
+            endianness=self.endianness,
+            architecture=self.architecture,
+            bitness=self.bitness,
+            pie=self.pie,
+            canary=self.canary,
+            return_type=self.return_type,
+            argv=", ".join([f"{arg[0]} {arg[1]}" for arg in self.argv]),
+            
+        )
+        for bb in self.basic_blocks:
+            block_orm = bb.orm()
+            func.basic_blocks.append(block_orm)
+            block_orm.function = func
+
+        for src in self.sources:
+            src_orm = src.orm()
+            func.sources.append(src_orm)
+            src_orm.function = func
+        
+        return func
+        
+    def db_add(self, session:Session):
+        f = self.orm()
+        session.add(f)
+        for bb in f.basic_blocks:
+            session.add(bb)
+            for instr in bb.instructions:
+                session.add(instr)
+                if instr.ir is not None:
+                    [session.add(ir) for ir in instr.ir]
+       
+
+class FunctionSource(BaseModel):
+    _backend: Backend = Backend()
+
+    lang:str = "C"
     decompiled:bool
     source: str
 
+    @classmethod
+    def from_orm(cls, orm):
+        return cls(
+            lang=orm.lang,
+            decompiled=orm.decompiled,
+            source=orm.source
+        )
+
+    def orm(self):
+        return SourceFunctionORM(
+            sha256=self.sha256,
+            lang=self.lang,
+            decompiled=self.decompiled,
+            source=self.source
+        )
+
+    def __hash__(self):
+        return int(self.sha256, 16)
+
+    @computed_field(repr=False)
+    @cached_property
+    def sha256(self) -> str:
+        '''sha256 hex digest of the file'''
+        return hashlib.sha256(bytes(self.source, 'utf8')).hexdigest()
+
+    def set_disassembler(self, disassembler:"Disassembler"):
+        self._backend.disassembler=disassembler
+
+    def orm(self, compiled_func:Function=None):
+        src = SourceFunctionORM(
+            sha256=self.sha256,
+            lang=self.lang,
+            decompiled=self.decompiled,
+            source=self.source
+        )
+        if compiled_func is not None:
+            src.compiled = compiled_func.orm()
+
+        return src
+
+    def commit(self):
+        if self._backend.db is None:
+            raise NoDBException()
+
+        with Session(self._backend.db) as s:
+            s.add(self.orm())
+            s.commit()
+    
 class Section(BaseModel):
     name: str
     type: str
@@ -212,21 +459,18 @@ class Binary(NativeCode):
     class NoDataException(Exception):
         pass
 
+    _backend: Backend = Backend()
+
     # Path to where the binary is stored
     _path: Path = None
     # The file contents of the binary
     _bytes: bytes = None
 
-    _functions: Set[Function] = None
+    _functions: Set[Function] = None   
 
-    # A disassembler associated with this binary
-    # Properties like `functions` is lazy loaded and requires a disassember
-    # to pull that information out 
-    _disassembler: 'Disassembler'
-
-    filename: Optional[str] = None
+    filename: Optional[Union[str, List[str]]] = None
     entrypoint: int = None
-    os: str = None
+    os: Optional[str] = None
     # TODO base_addr:int = None
     sections: List[Section] = []
     dynamic_libs: Set[str] = set([])
@@ -247,6 +491,40 @@ class Binary(NativeCode):
         obj._bytes = b
         return obj
 
+    @classmethod
+    def from_orm(cls, orm):
+        b = cls(
+            filename=os.path.basename(orm.path),
+            architecture=orm.architecture,
+            endianness=orm.endianness,
+            bitness=orm.bitness,
+            entrypoint=orm.entrypoint,
+            path=orm.path,
+            names=[n.name for n in orm.names],
+            strings=set([s.value for s in orm.strings]),
+            os = orm.os,
+            sha256=orm.sha256,
+            nx=orm.nx,
+            pie=orm.pie,
+            canary=orm.canary,
+            relro=orm.relro,
+            rpath=orm.rpath,
+            runpath=orm.runpath,
+            stripped=orm.stripped,
+            fortify=orm.fortify,
+            fortified=orm.fortified,
+            fortifiable=orm.fortifiable,
+            fortify_score=orm.fortify_score
+        )
+        b.set_path(orm.path)
+
+        for f in orm.functions:
+            func = Function.from_orm(f)
+            # TODO func.address = 
+            b.functions.add(func)
+
+        return b
+
     def __hash__(self):
         return int(self.sha256, 16)
     
@@ -255,14 +533,51 @@ class Binary(NativeCode):
             return x in self.functions
         elif isinstance(x, BasicBlock) or isinstance(x, Instruction) or isinstance(x, bytes):
             return any([x in f for f in self.functions])
- 
+    
+    
+    def orm(self):
+        name = NameORM(name=self.filename)
+        strings = [StringsORM(value=s) for s in self.strings]
+    
+        b = BinaryORM(
+            path=str(self._path), 
+            names=[name],
+            strings=strings,
+            endianness = self.endianness,
+            architecture = self.architecture,
+            bitness = self.bitness,
+            entrypoint = self.entrypoint,
+            os = self.os,
+            sha256=self.sha256,
+            nx=self.nx,
+            pie=self.pie,
+            canary=self.canary,
+            relro=self.relro,
+            rpath=self.rpath,
+            runpath=self.runpath,
+            stripped=self.stripped,
+            fortify=self.fortify,
+            fortified=self.fortified,
+            fortifiable=self.fortifiable,
+            fortify_score=self.fortify_score
+        )
+
+        return b
+
+    def db_add(self, session:Session):
+        b = self.orm()
+        session.add(b)
+        for f in self.functions:
+            f.db_add(session)
+            
+
     def set_path(self, path:Union[Path, str]):
         if isinstance(path, str):
             path = Path(path)
         self._path = path
 
-    def set_disassembler(self, d:'Disassembler'):
-        self._disassembler = d
+    def set_disassembler(self, disassembler:"Disassembler"):
+        self._backend.disassembler=disassembler
 
     @computed_field(repr=False)
     @cached_property
@@ -327,16 +642,23 @@ class Binary(NativeCode):
 
     @computed_field(repr=True)
     @property
-    def functions(self) -> Set[Function]:
-        if self._functions is None:
-            if self._disassembler is None:
-                # log warning?
-                return None
-            else:
-                self._functions = set(self._disassembler.functions())
+    def functions(self) -> Iterable[Function]:
+        if self._backend.db is not None:
+            with Session(self._backend.db) as s:
+                # Weirdness w/ query building & cached property
+                # warm cache up before building query or else it breaks
+                self.sha256
 
-        return self._functions
-    
+                stmt = select(BinaryORM).where(BinaryORM.sha256 == self.sha256)
+                bin_orm = s.execute(stmt).first()
+                if bin_orm is not None:
+                    # TODO need to recover address :(
+                    return [Function.from_orm(f) for f in bin_orm[0].functions]
+        
+        if self._backend.disassembler is not None:
+            return set(self._backend.disassembler.functions())
+
+        return set()
     
     def bytes(self) -> bytes:
         '''return the raw bytes of the binary'''

@@ -191,11 +191,11 @@ class Ghidra(Disassembler):
             pie=self._bin.pie,
             canary=self._bin.canary,
             address=f.getEntryPoint().getOffset(),
-            name=f.getName(),
+            names=[f.getName()],
             return_type=str(proto.getReturnType()),
             argv = [(str(proto.getParam(i).getDataType()), str(proto.getParam(i).getName())) for i in range(proto.getNumParams())]
         )
-        func.source.append(dsrc)
+        func.sources.add(dsrc)
 
         blocks = self.bb_model.getCodeBlocksContaining(f.getBody(), self.monitor)
         history = set()
@@ -215,8 +215,8 @@ class Ghidra(Disassembler):
             )
 
             curr_instr = self.listing.getInstructionAt(bb.getFirstStartAddress())
-            while (bb.contains(curr_instr.getAddress())):
-                pcodes = list(curr_instr.getPCode())
+            while (curr_instr is not None and bb.contains(curr_instr.getAddress())):
+                pcodes = [str(p) for p in curr_instr.getPcode()]
                 ir = IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
                 instr = Instruction(
                         endianness=self._bin.endianness,
@@ -230,6 +230,8 @@ class Ghidra(Disassembler):
                 basicblock.instructions.append(instr)
                 
                 curr_instr = curr_instr.getNext()
+
+            func.basic_blocks.add(basicblock)
 
         return func
 

@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, unquote
 
 from archinfo import *
 
-arches = [ArchAArch64, ArchAMD64, ArchARM, ArchARMCortexM, ArchARMEL, ArchARMEL, ArchARMHF, ArchAVR8, ArchMIPS32, ArchMIPS64, ArchPPC32, ArchPPC64, ArchPcode, ArchRISCV64, ArchS390X, ArchSoot, ArchX86]
+arches = [ArchAArch64, ArchAMD64, ArchARM, ArchARMCortexM, ArchARMEL, ArchARMEL, ArchARMHF, ArchAVR8, ArchMIPS32, ArchMIPS64, ArchPPC32, ArchPPC64, ArchRISCV64, ArchS390X, ArchSoot, ArchX86]
 archinfo_lookup = defaultdict(lambda: ArchNotFound)
 for a in arches:
     archinfo_lookup[a.name] = a

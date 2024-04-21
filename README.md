@@ -19,3 +19,24 @@
 
 ### Compare Results across Disassemblers 
 - Assess which IL is best for a specific task (e.g., Pcode or Binja-IL for Function Diffing?)
+
+# Example Usage
+
+```python
+from sqlalchemy.orm import Session
+
+from binocular.ghidra import Ghidra
+from binocular.primitives import Backend
+
+Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
+
+with Ghidra(save_on_close=True) as g:
+    assert g.is_installed()
+    g.load("/bin/ls")
+    
+    b = g.binary()
+
+    with Session(Backend.engine) as s:
+        b.db_add(s)
+        s.commit()
+```
