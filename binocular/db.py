@@ -41,7 +41,6 @@ native_func_pivot = Table(
     Column("native_func_id", ForeignKey("native_functions.id")),
 )
 
-
 class NameORM(Base):
     __tablename__ = "names"
     
@@ -52,40 +51,6 @@ class StringsORM(Base):
     __tablename__ = "strings"
     id: Mapped[int] = mapped_column(primary_key=True)
     value: Mapped[str] = mapped_column(String(512))
-
-# Not really that important to keep
-# also easily reacalculated
-# class Section(Base):
-#     __tablename__ = "bin_sections"
-#     id: Mapped[int] = mapped_column(primary_key=True)
-#     binary: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
-#     name: Mapped[str]
-#     type: Mapped[str]
-#     start: Mapped[int]
-#     offset: Mapped[int]
-#     entsize: Mapped[int]
-#     link: Mapped[int]
-#     info: Mapped[int]
-#     align: Mapped[int]
-
-#     # Flags
-#     write: Mapped[bool]
-#     alloc: Mapped[bool]
-#     execute: Mapped[bool]
-#     merge: Mapped[bool]
-#     strings: Mapped[bool]
-#     info_flag: Mapped[bool]
-#     link_order: Mapped[bool]
-#     extra_processing: Mapped[bool]
-#     group: Mapped[bool]
-#     tls: Mapped[bool]
-#     compressed: Mapped[bool]
-#     unknown: Mapped[bool]
-#     os_specific: Mapped[bool]
-#     exclude: Mapped[bool]
-#     mbind: Mapped[bool]
-#     large: Mapped[bool]
-#     processor_specific: Mapped[bool]
 
 class BinaryORM(Base):
     __tablename__ = "binaries"
@@ -118,13 +83,6 @@ class BinaryORM(Base):
         secondary=native_func_pivot,
         back_populates='binaries'
     )
-
-    # @classmethod
-    # def get(cls, engine, hash:str):
-    #     with Session(engine) as session:
-    #         stmt = select(BinaryORM).where(BinaryORM.sha256 == hash)
-    #         return session.execute(stmt).first()
-
 
 
 class NativeFunctionORM(Base):

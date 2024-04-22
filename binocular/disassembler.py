@@ -12,6 +12,18 @@ class Disassembler(ABC):
     class ArchitectureNotSupported(Exception):
         pass
 
+    def __enter__(self):
+        return self.open()
+
+    def __exit__(self, type, value, tb):
+        self.close()
+
+    def open(self):
+        pass
+
+    def close(self):
+        pass
+
     @abstractmethod
     def is_installed(self) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''

@@ -13,7 +13,7 @@ from pyhidra.core import _setup_project, _analyze_program
 
 from .disassembler import Disassembler
 from .primitives import Binary, Section, Function, BasicBlock, Instruction, IR, FunctionSource
-from .consts import Endian, IL
+from .consts import Endian, IL, BranchType
 
 class Ghidra(Disassembler):
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
@@ -37,14 +37,11 @@ class Ghidra(Disassembler):
 
         self.save_on_close = save_on_close
         self.decomp_timeout = 60
-
-    def __enter__(self):
+        
+    def open(self):
         if not PyhidraLauncher.has_launched():
             HeadlessPyhidraLauncher(install_dir=self.ghidra_home,verbose=False).start()
         return self
-
-    def __exit__(self, type, value, tb):
-        self.close()
 
     def close(self):
         from ghidra.app.script import GhidraScriptUtil
@@ -148,6 +145,7 @@ class Ghidra(Disassembler):
             props['endianness'] = Endian.BIG
 
         props['filename'] = self.program.getName()
+        props['names'] = [os.path.basename(props['filename'])]
         props['entrypoint'] = self._get_entrypoint()
         props['architecture'] = str(lang_data.getProcessor())
         props['bitness'] = lang_data.getSize()
@@ -174,6 +172,8 @@ class Ghidra(Disassembler):
         return self.program.getAddressFactory().getDefaultAddressSpace().getAddress(offset)
 
     def _convert_func(self, f):
+        from ghidra.program.model.symbol import FlowType
+
         res = self.decomp.decompileFunction(f, self.decomp_timeout, self.monitor)
         high_func = res.getHighFunction()
         proto = high_func.getFunctionPrototype()
@@ -202,6 +202,7 @@ class Ghidra(Disassembler):
         while(blocks.hasNext()):
             bb = blocks.next()
             bb_addr = bb.getFirstStartAddress().getOffset()
+            
             if bb_addr in history:
                 continue
 
@@ -214,19 +215,37 @@ class Ghidra(Disassembler):
                 address=bb_addr,
             )
 
+            if bb_addr == func.address:
+                func.start = basicblock
+
+            dest_refs = bb.getDestinations(self.monitor)
+            while(dest_refs.hasNext()):
+                dest = dest_refs.next()
+                if not self.fm.getFunctionAt(dest.getDestinationAddress()):
+                    dest_addr = dest.getDestinationAddress().getOffset()
+                    flow_type = dest.getFlowType()
+                    if flow_type.hasFallthrough():
+                        basicblock.branches.add((BranchType.FalseBranch, dest_addr))
+                    elif flow_type.isConditional():
+                        basicblock.branches.add((BranchType.TrueBranch, dest_addr))
+                    elif flow_type.isUnConditional():
+                        basicblock.branches.add((BranchType.UnconditionalBranch, dest_addr))
+                    elif flow_type.isComputed():
+                        basicblock.branches.add((BranchType.IndirectBranch, None))
+
             curr_instr = self.listing.getInstructionAt(bb.getFirstStartAddress())
             while (curr_instr is not None and bb.contains(curr_instr.getAddress())):
                 pcodes = [str(p) for p in curr_instr.getPcode()]
                 ir = IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
                 instr = Instruction(
-                        endianness=self._bin.endianness,
-                        architecture=self._bin.architecture,
-                        bitness=self._bin.bitness,
-                        address=curr_instr.getAddress().getOffset(), 
-                        data=bytes(curr_instr.getBytes()),
-                        asm=curr_instr.getMnemonicString(),
-                        ir=ir,
-                    )
+                    endianness=self._bin.endianness,
+                    architecture=self._bin.architecture,
+                    bitness=self._bin.bitness,
+                    address=curr_instr.getAddress().getOffset(), 
+                    data=bytes(curr_instr.getBytes()),
+                    asm=curr_instr.getMnemonicString(),
+                    ir=ir,
+                )
                 basicblock.instructions.append(instr)
                 
                 curr_instr = curr_instr.getNext()

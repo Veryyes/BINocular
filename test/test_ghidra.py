@@ -2,7 +2,7 @@ import itertools
 
 from binocular import Ghidra, Binary
 
-def test_binary(make):
+def test_disassm(make):
     with Ghidra() as g:
         assert g.is_installed()
         
@@ -13,6 +13,25 @@ def test_binary(make):
 
         strings = ["Need at least 1 cmd arg", "i use arch btw"]
         assert set(strings) <= b.strings
+
+        fs = set(g.functions())
+        fnames = [f.names for f in fs]
+        assert 'main' in itertools.chain(*fnames)
+        assert 'foo' in itertools.chain(*fnames)
+        assert 'bar' in itertools.chain(*fnames)
+
+        a = sorted(list(b.functions), key=lambda x:x.address)
+        b = sorted(list(fs), key=lambda x:x.address)
+
+        for f0, f1 in zip(a,b):
+            assert f0 == f1
+
+def test_binary(make):
+    with Ghidra() as g:
+        assert g.is_installed()
+        
+        g.load("example")
+        b = g.binary()
 
         borm = b.orm()
         assert b.architecture == borm.architecture
@@ -70,17 +89,21 @@ def test_binary(make):
         assert b1.fortifiable == b.fortifiable
         assert b1.fortify_score == b.fortify_score
 
-        fs = set(g.functions())
-        fnames = [f.names for f in fs]
-        assert 'main' in itertools.chain(*fnames)
-        assert 'foo' in itertools.chain(*fnames)
-        assert 'bar' in itertools.chain(*fnames)
+def test_function(make):
+    with Ghidra() as g:
+        assert g.is_installed()
+        
+        g.load("example")
+        b = g.binary()
+        f = g.function_sym('foo')
 
-        a = sorted(list(b.functions), key=lambda x:x.address)
-        b = sorted(list(fs), key=lambda x:x.address)
+        form = f.orm()
+        assert f.architecture == form.architecture
+        assert f.endianness == form.endianness
+        assert f.bitness == form.bitness
+        assert f.pie == form.pie
+        assert f.canary == form.canary
+        assert f.return_type == form.return_type
+        assert ", ".join([" ".join(x) for x in f.argv]) == form.argv
 
-        for f0, f1 in zip(a,b):
-            assert f0 == f1
-
-            
-
+        

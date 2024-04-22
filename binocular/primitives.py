@@ -7,8 +7,6 @@ import os
 import tempfile
 import hashlib
 
-
-import rich
 import networkx as nx
 from pydantic import BaseModel, computed_field
 from pydantic.dataclasses import dataclass
@@ -20,7 +18,7 @@ import pyvex
 
 
 from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM
-from .consts import Endian, BranchType, IL
+from .consts import Endian, BranchType, IL, IndirectToken
 from .utils import str2archinfo
 
 @dataclass
@@ -268,8 +266,8 @@ class Function(NativeCode):
     sources: Set[FunctionSource] = set([])
 
     basic_blocks: Optional[Set[BasicBlock]] = set([])
-    prologue: Optional[BasicBlock] = None
-    epilogue: Optional[BasicBlock] = None # does this need to be a list?
+    start: BasicBlock = None
+    end: Set[BasicBlock] = set([])
     
     calls: Optional[Set[Function]] = set([])
     callers: Optional[Set[Function]] = set([])
@@ -290,7 +288,6 @@ class Function(NativeCode):
             argv=[tuple(arg.strip().rsplit(" ", 1)) for arg in orm.argv.split(",")],
         )
 
-        # TODO basic blocks
         for bb in orm.basic_blocks:
             f.basic_blocks.add(BasicBlock.from_orm(bb))
 
@@ -301,7 +298,13 @@ class Function(NativeCode):
 
     def __hash__(self):
         return hash(frozenset(self.basic_blocks))
+
+    def __eq__(self, other:Function) -> bool:
+        return hash(self) == hash(other)
     
+    def __ne__(self, other:Function) -> bool:
+        return hash(self) != hash(other)
+
     def __contains__(self, x:Union[BasicBlock, Instruction, bytes]):
         if isinstance(x, BasicBlock):
             return x in self.basic_blocks
@@ -317,7 +320,41 @@ class Function(NativeCode):
     # Should just we reconstructing the Graph Obj and not extra analysis
     @cached_property
     def cfg(self) -> nx.MultiDiGraph:
-        raise NotImplementedError
+        # setup cache
+        blocks = dict()
+        for bb in self.basic_blocks:
+            blocks[bb.address] = bb
+
+        cfg = nx.MultiDiGraph()
+        self._cfg(set(), blocks, cfg, self.start)
+
+        return cfg
+
+    def _cfg(self, history, block_cache, g, bb):
+        if bb in history:
+            return
+
+        history.add(bb)
+        g.add_node(bb)
+        for btype, addr in bb.branches:
+            next_bb = block_cache.get(addr, None)
+
+            if addr is None:
+                # Statically Unknown Branch Location (e.g. indirect jump)
+                dest = IndirectToken()
+            elif next_bb is None:
+                # Branch goes to an address that doesnt match a bb we have
+                dest = addr
+            else:
+                dest = next_bb
+
+            g.add_node(dest)
+            g.add_edge(bb, dest, branch=btype)
+
+            if isinstance(dest, BasicBlock):
+                self._cfg(history, block_cache, g, dest)
+
+
 
     # @computed_field(repr=False)
     # @cached_property
@@ -469,6 +506,7 @@ class Binary(NativeCode):
     _functions: Set[Function] = None   
 
     filename: Optional[Union[str, List[str]]] = None
+    names: List[str] = []
     entrypoint: int = None
     os: Optional[str] = None
     # TODO base_addr:int = None
@@ -541,7 +579,7 @@ class Binary(NativeCode):
     
         b = BinaryORM(
             path=str(self._path), 
-            names=[name],
+            names=[name] + [NameORM(name=n) for n in self.names],
             strings=strings,
             endianness = self.endianness,
             architecture = self.architecture,

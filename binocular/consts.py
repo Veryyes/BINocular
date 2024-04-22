@@ -1,3 +1,4 @@
+import random
 from enum import Enum
 
 class Endian(Enum):
@@ -15,6 +16,10 @@ class IL(Enum):
     VEX = 0
     ESIL = 1
     PCODE = 2
+
+class IndirectToken:
+    '''A Token to represent a Dynamically Determined Value'''
+    pass
 
 # Not an ENUM; Just Macros
 X86 = "x86"
