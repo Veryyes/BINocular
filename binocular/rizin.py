@@ -112,7 +112,7 @@ class Rizin(Disassembler):
             props['endianness'] = Endian.BIG
         props['bitness'] = bin_info['bits']
         props['os'] = bin_info['os']
-        
+        props['base_addr'] = int(self._pipe.cmd("echo $B"), 16)
         props['entrypoint'] = self._pipe.cmdj('iej')[0]['vaddr']
         props['filename'] = os.path.basename(path)
         props['names'] = [os.path.basename(path)]

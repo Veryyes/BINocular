@@ -149,6 +149,7 @@ class Ghidra(Disassembler):
         props['entrypoint'] = self._get_entrypoint()
         props['architecture'] = str(lang_data.getProcessor())
         props['bitness'] = lang_data.getSize()
+        props['base_addr'] = self.program.getImageBase()
 
         self._bin = Binary(**props)
         self._bin.sections = sections

@@ -63,6 +63,7 @@ class BinaryORM(Base):
     bitness:Mapped[int]
     entrypoint: Mapped[Optional[int]]
     os:Mapped[Optional[str]]
+    base_addr:Mapped[int]
     # TODO dynamic libs
     strings: Mapped[List[StringsORM]] = relationship(secondary=string_pivot)
     

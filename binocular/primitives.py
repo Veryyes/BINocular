@@ -77,8 +77,6 @@ class Instruction(NativeCode):
     address: Optional[int] = None
     data: bytes
     asm: Optional[str] = ""
-    # TODO make computed
-    # operands: Optional[List[str]] = list()
     comment: Optional[str] = ""
     ir: Optional[IR] = None
 
@@ -314,12 +312,6 @@ class Function(NativeCode):
             return any([x in bb for bb in self.basic_blocks])
         raise TypeError
 
-
-    # Note: Better to just recalculate this after deserialization
-    # We don't have to do any hard analysis of figuring out where jumps/xrefs go
-    # because that is assuming already done and stored in this object
-    #
-    # Should just we reconstructing the Graph Obj and not extra analysis
     @cached_property
     def cfg(self) -> nx.MultiDiGraph:
         # setup cache
@@ -505,7 +497,7 @@ class Binary(NativeCode):
     names: List[str] = []
     entrypoint: int = None
     os: Optional[str] = None
-    # TODO base_addr:int = None
+    base_addr:int = 0
     sections: List[Section] = []
     dynamic_libs: Set[str] = set([])
     
@@ -536,7 +528,8 @@ class Binary(NativeCode):
             path=orm.path,
             names=[n.name for n in orm.names],
             strings=set([s.value for s in orm.strings]),
-            os = orm.os,
+            os=orm.os,
+            base_addr=orm.base_addr,
             sha256=orm.sha256,
             nx=orm.nx,
             pie=orm.pie,
@@ -581,6 +574,7 @@ class Binary(NativeCode):
             architecture = self.architecture,
             bitness = self.bitness,
             entrypoint = self.entrypoint,
+            base_addr = self.base_addr,
             os = self.os,
             sha256=self.sha256,
             nx=self.nx,
