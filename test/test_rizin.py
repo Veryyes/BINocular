@@ -1,9 +1,9 @@
 import itertools
 
-from binocular import Ghidra, Binary
+from binocular import Rizin, Binary
 
 def test_disassm(make):
-    with Ghidra() as g:
+    with Rizin() as g:
         assert g.is_installed()
         
         g.load("example")
@@ -27,7 +27,7 @@ def test_disassm(make):
             assert f0 == f1
 
 def test_binary(make):
-    with Ghidra() as g:
+    with Rizin() as g:
         assert g.is_installed()
         
         g.load("example")
@@ -90,11 +90,10 @@ def test_binary(make):
         assert b1.fortify_score == b.fortify_score
 
 def test_function(make):
-    with Ghidra() as g:
+    with Rizin() as g:
         assert g.is_installed()
         
         g.load("example")
-        b = g.binary()
         f = g.function_sym('foo')
 
         form = f.orm()

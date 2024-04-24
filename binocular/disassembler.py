@@ -19,7 +19,7 @@ class Disassembler(ABC):
         self.close()
 
     def open(self):
-        pass
+        return self
 
     def close(self):
         pass

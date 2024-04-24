@@ -105,6 +105,7 @@ class NativeFunctionORM(Base):
     canary:Mapped[bool]
     return_type:Mapped[str]
     argv:Mapped[str]
+    thunk:Mapped[bool]
     # calls:Mapped[List[NativeFunction]] =  relationship("NativeFunction", back_populates='callers') 
     # callers:Mapped[List[NativeFunction]] =  relationship("NativeFunction", back_populates="calls")
 

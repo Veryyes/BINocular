@@ -193,7 +193,8 @@ class Ghidra(Disassembler):
             address=f.getEntryPoint().getOffset(),
             names=[f.getName()],
             return_type=str(proto.getReturnType()),
-            argv = [(str(proto.getParam(i).getDataType()), str(proto.getParam(i).getName())) for i in range(proto.getNumParams())]
+            argv = [(str(proto.getParam(i).getDataType()), str(proto.getParam(i).getName())) for i in range(proto.getNumParams())],
+            thunk=f.isThunk()
         )
         func.sources.add(dsrc)
 

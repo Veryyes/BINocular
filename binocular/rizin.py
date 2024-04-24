@@ -30,12 +30,6 @@ class Rizin(Disassembler):
         self._funcs_by_name = dict()
         self._funcs_by_addr = dict()
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, tb):
-        self.close()
-
     def close(self):
         self._pipe.quit()
 
@@ -120,8 +114,10 @@ class Rizin(Disassembler):
         props['os'] = bin_info['os']
         
         props['entrypoint'] = self._pipe.cmdj('iej')[0]['vaddr']
-
-        self._bin = Binary(filename=os.path.basename(path), **props)
+        props['filename'] = os.path.basename(path)
+        props['names'] = [os.path.basename(path)]
+        
+        self._bin = Binary(**props)
         self._bin.set_path(path)
         self._bin.set_disassembler(self)
 
@@ -165,6 +161,16 @@ class Rizin(Disassembler):
         addr = self._pipe.cmdj("afoj")['address']
         signature = self._pipe.cmdj('afsj')
         argv = [(arg['type'], arg['name']) for arg in  signature['args']]
+        
+        name = signature['name']
+        if name.startswith("sym."):
+            name = name[len("sym."):]
+
+        thunk=False
+        if name.startswith("imp."):
+            name = name[len("imp."):]
+            thunk=True
+
         func = Function(
             endianness=self._bin.endianness,
             architecture=self._bin.architecture,
@@ -172,9 +178,10 @@ class Rizin(Disassembler):
             pie=self._bin.pie,
             canary=self._bin.canary,
             address=addr,
-            name=signature['name'],
+            names=[name],
             argv=argv,
-            return_type=signature["ret"]
+            return_type=signature["ret"],
+            thunk=thunk
         )
 
         # For each basic block in the function
@@ -188,8 +195,9 @@ class Rizin(Disassembler):
     def function_sym(self, symbol:str) -> Function:
         for f in self._pipe.cmdj("aflj"):
             name = f['name']
-            if symbol == name:
+            if symbol in name:
                 return self.function(f['offset'])
+        raise KeyError
 
     def functions(self) -> Iterable[Function]:
         # Functions
@@ -219,7 +227,7 @@ class Rizin(Disassembler):
     def instruction(self, address: int) -> Instruction:
         self._pipe.cmd(f"s {address}")
 
-        instr_data = self._pipe.cmdj(f"pdj 1")
+        instr_data = self._pipe.cmdj(f"pdj 1")[0]
         instr = Instruction(
             endianness=self._bin.endianness,
             architecture=self._bin.architecture,
@@ -228,13 +236,13 @@ class Rizin(Disassembler):
             data=bytes.fromhex(instr_data['bytes'])
         )
         
-        if instr.get('disasm', None) is not None:
-            instr.asm = instr['disasm']
+        if instr_data.get('disasm', None) is not None:
+            instr.asm = instr_data['disasm']
 
-        if instr.get('comment', None) is not None:
-            instr.comment = str(binascii.a2b_base64(instr['comment']), 'utf8')
+        if instr_data.get('comment', None) is not None:
+            instr.comment = str(binascii.a2b_base64(instr_data['comment']), 'utf8')
 
-        ir = instr.get('esil', None)
+        ir = instr_data.get('esil', None)
         if ir is not None and len(ir) > 0:
             instr.ir = IR(IL.ESIL, ir)
 

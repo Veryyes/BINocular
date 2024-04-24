@@ -264,6 +264,7 @@ class Function(NativeCode):
     return_type:Optional[str] = None
     argv: List[Tuple[str, str]] = None
     sources: Set[FunctionSource] = set([])
+    thunk:bool = False
 
     basic_blocks: Optional[Set[BasicBlock]] = set([])
     start: BasicBlock = None
@@ -285,6 +286,7 @@ class Function(NativeCode):
             pie=orm.pie,
             canary=orm.canary,
             return_type=orm.return_type,
+            thunk=orm.thunk,
             argv=[tuple(arg.strip().rsplit(" ", 1)) for arg in orm.argv.split(",")],
         )
 
@@ -354,13 +356,6 @@ class Function(NativeCode):
             if isinstance(dest, BasicBlock):
                 self._cfg(history, block_cache, g, dest)
 
-
-
-    # @computed_field(repr=False)
-    # @cached_property
-    # def decompile(self) -> FunctionSource:
-    #     pass
-
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
 
@@ -377,6 +372,7 @@ class Function(NativeCode):
             pie=self.pie,
             canary=self.canary,
             return_type=self.return_type,
+            thunk=self.thunk,
             argv=", ".join([f"{arg[0]} {arg[1]}" for arg in self.argv]),
             
         )
