@@ -253,6 +253,7 @@ class Ghidra(Disassembler):
                 curr_instr = curr_instr.getNext()
 
             func.basic_blocks.add(basicblock)
+            basicblock.set_function(func)
 
         return func
 

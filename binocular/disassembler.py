@@ -51,14 +51,17 @@ class Disassembler(ABC):
 
     @abstractmethod
     def function(self, address:int) -> Function:
+        '''Returns a Function at the address specified'''
         raise NotImplementedError
 
     @abstractmethod
     def function_sym(self, symbol:str) -> Function:
+        '''Returns a Function with the given symbol names'''
         raise NotImplementedError
 
     @abstractmethod
     def functions(self) -> Iterable[Function]:
+        '''Returns an iterator of all Functions'''
         raise NotImplementedError
 
     ################
@@ -67,6 +70,7 @@ class Disassembler(ABC):
 
     @abstractmethod
     def basic_block(self, address:int) -> BasicBlock:
+        '''Returns a basic block at the given address'''
         raise NotImplementedError
 
     ################
@@ -75,4 +79,5 @@ class Disassembler(ABC):
 
     @abstractmethod
     def instruction(self, address:int) -> Instruction:
+        '''Returns the instruction at the given address'''
         raise NotImplementedError

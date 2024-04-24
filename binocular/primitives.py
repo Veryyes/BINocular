@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Union, Set, IO, Optional, Tuple, Iterable
+from typing import Dict, List, Union, Set, IO, Optional, Tuple, Iterable
 from functools import cached_property
 from pathlib import Path
 import os
@@ -155,6 +155,7 @@ class Instruction(NativeCode):
 
 class BasicBlock(NativeCode): 
     _backend: Backend = Backend()
+    _function: Optional[Function] = None
 
     address: Optional[int] = None
     pie:PIEType = None
@@ -184,9 +185,39 @@ class BasicBlock(NativeCode):
 
         return bb
 
+    class BasicBlockIterator:
+        def __init__(self, block:BasicBlock):
+            self.blocks = list(block.branches)
+            self.idx = 0
 
-    # TODO Consider
-    # next() -> return subsequent blocks
+            self.block_cache = dict()
+            for bb in block._function.basic_blocks:
+                self.block_cache[bb.address] = bb
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.idx >= len(self.blocks):
+                raise StopIteration
+
+            btype, addr = self.blocks[self.idx]
+            target_bb = self.block_cache.get(addr, None)
+            if addr is None:
+                # Statically Unknown Branch Location (e.g. indirect jump)
+                dest = IndirectToken()
+            elif target_bb is None:
+                # Branch goes to an address that doesnt match a bb we have
+                dest = addr
+            else:
+                dest = target_bb
+
+            self.idx += 1
+            return btype, dest
+
+    
+    def __iter__(self):
+        return BasicBlock.BasicBlockIterator(self)
 
     def __hash__(self):
         return hash(self.bytes)
@@ -205,6 +236,9 @@ class BasicBlock(NativeCode):
 
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
+
+    def set_function(self, func:Function):
+        self._function = func
 
     @cached_property
     def bytes(self) -> bytes:
@@ -254,6 +288,7 @@ class BasicBlock(NativeCode):
 
 class Function(NativeCode):
     _backend: Backend = Backend()
+    _block_cache: Dict[int, Optional[BasicBlock]] = dict()
 
     address: Optional[int] = None
     pie:Optional[PIEType] = None
@@ -330,18 +365,8 @@ class Function(NativeCode):
 
         history.add(bb)
         g.add_node(bb)
-        for btype, addr in bb.branches:
-            next_bb = block_cache.get(addr, None)
 
-            if addr is None:
-                # Statically Unknown Branch Location (e.g. indirect jump)
-                dest = IndirectToken()
-            elif next_bb is None:
-                # Branch goes to an address that doesnt match a bb we have
-                dest = addr
-            else:
-                dest = next_bb
-
+        for btype, dest in bb:
             g.add_node(dest)
             g.add_edge(bb, dest, branch=btype)
 

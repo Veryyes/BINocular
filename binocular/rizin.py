@@ -27,9 +27,6 @@ class Rizin(Disassembler):
         self._pipe = None
         self._bin = None
 
-        self._funcs_by_name = dict()
-        self._funcs_by_addr = dict()
-
     def close(self):
         self._pipe.quit()
 
@@ -185,10 +182,14 @@ class Rizin(Disassembler):
         )
 
         # For each basic block in the function
-        for b in self._pipe.cmdj('afbj'):
+        for idx, b in enumerate(self._pipe.cmdj('afbj')):
             bb = self.basic_block(b['addr'])
+
+            if idx == 0:
+                func.start=bb
             
             func.basic_blocks.add(bb)
+            bb.set_function(func)
         return func
             
     @lru_cache
@@ -221,6 +222,13 @@ class Rizin(Disassembler):
             instr = self.instruction(addr)
         
             bb.instructions.append(instr)
+
+        if bb_data.get('fail', None) is not None:
+            bb.branches.add((BranchType.FalseBranch, bb_data['fail']))
+            if bb_data.get('jump', None) is not None:
+                bb.branches.add((BranchType.TrueBranch, bb_data['jump']))
+        elif bb_data.get('jump', None) is not None:
+            bb.branches.add((BranchType.UnconditionalBranch, bb_data['jump']))
 
         return bb
 
