@@ -52,11 +52,22 @@ class StringsORM(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     value: Mapped[str] = mapped_column(String(512))
 
+class MetaInfo(Base):
+    __tablename__ = "metainfo"
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bin: Mapped[BinaryORM] = relationship(back_populates="metainfo")
+
+    path: Mapped[str]
+    compressed: Mapped[bool]
+
 class BinaryORM(Base):
     __tablename__ = "binaries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    path: Mapped[str]
+    metainfo_id: Mapped[Optional[int]] = mapped_column(ForeignKey('metainfo.id'))
+    metainfo: Mapped[Optional[MetaInfo]] = relationship(back_populates="bin")
+
     names: Mapped[List[NameORM]] = relationship(secondary=bin_name_pivot)
     endianness: Mapped[Endian]
     architecture: Mapped[str]
@@ -64,8 +75,11 @@ class BinaryORM(Base):
     entrypoint: Mapped[Optional[int]]
     os:Mapped[Optional[str]]
     base_addr:Mapped[int]
-    # TODO dynamic libs
+    dynamic_libs:Mapped[Optional[str]]
     strings: Mapped[List[StringsORM]] = relationship(secondary=string_pivot)
+
+    compiler: Mapped[Optional[str]]
+    compilation_flags: Mapped[Optional[str]]
     
     sha256:Mapped[str] = mapped_column(String(32))
     nx:Mapped[bool]
@@ -79,6 +93,8 @@ class BinaryORM(Base):
     fortified:Mapped[int]
     fortifiable:Mapped[int]
     fortify_score:Mapped[int]
+
+    tags:Mapped[str]
 
     functions: Mapped[List[NativeFunctionORM]] = relationship(
         secondary=native_func_pivot,

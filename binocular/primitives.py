@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 import pyvex
 
 
-from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM
+from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo
 from .consts import Endian, BranchType, IL, IndirectToken
 from .utils import str2archinfo
 
@@ -513,6 +513,8 @@ class Binary(NativeCode):
 
     # Path to where the binary is stored
     _path: Path = None
+    # Whether or not the binary at self._path is gz compressed
+    _compressed:bool=False
     # The file contents of the binary
     _bytes: bytes = None
 
@@ -525,10 +527,14 @@ class Binary(NativeCode):
     base_addr:int = 0
     sections: List[Section] = []
     dynamic_libs: Set[str] = set([])
+    compiler: Optional[str] = None
+    compilation_flags: Optional[str] = None
     
     # Strings from String table
     # maybe use `$ strings` if not such structure exists in the binary?
     strings: Set[str] = set([])
+
+    tags: Set[str] = set([])
 
     @classmethod
     def from_path(cls, path:Union[Path, str], **kwargs):
@@ -545,14 +551,16 @@ class Binary(NativeCode):
     @classmethod
     def from_orm(cls, orm):
         b = cls(
-            filename=os.path.basename(orm.path),
+            filename=os.path.basename(orm.metainfo.path),
             architecture=orm.architecture,
             endianness=orm.endianness,
             bitness=orm.bitness,
             entrypoint=orm.entrypoint,
-            path=orm.path,
             names=[n.name for n in orm.names],
             strings=set([s.value for s in orm.strings]),
+            compiler=orm.compiler,
+            compilation_flags=orm.compilation_flags,
+            dynamic_libs=orm.dynamic_libs.split(","),
             os=orm.os,
             base_addr=orm.base_addr,
             sha256=orm.sha256,
@@ -566,9 +574,10 @@ class Binary(NativeCode):
             fortify=orm.fortify,
             fortified=orm.fortified,
             fortifiable=orm.fortifiable,
-            fortify_score=orm.fortify_score
+            fortify_score=orm.fortify_score,
+            tags=orm.tags.split(",")
         )
-        b.set_path(orm.path)
+        b.set_path(orm.metainfo.path)
 
         for f in orm.functions:
             func = Function.from_orm(f)
@@ -591,8 +600,13 @@ class Binary(NativeCode):
         name = NameORM(name=self.filename)
         strings = [StringsORM(value=s) for s in self.strings]
     
-        b = BinaryORM(
-            path=str(self._path), 
+        metainfo = MetaInfo(
+            path=str(self._path),
+            compressed=False
+        )
+
+        b = BinaryORM(       
+            metainfo=metainfo, 
             names=[name] + [NameORM(name=n) for n in self.names],
             strings=strings,
             endianness = self.endianness,
@@ -601,6 +615,9 @@ class Binary(NativeCode):
             entrypoint = self.entrypoint,
             base_addr = self.base_addr,
             os = self.os,
+            compiler=self.compiler,
+            compilation_flags=self.compilation_flags,
+            dynamic_libs=",".join(list(self.dynamic_libs)),
             sha256=self.sha256,
             nx=self.nx,
             pie=self.pie,
@@ -613,6 +630,7 @@ class Binary(NativeCode):
             fortified=self.fortified,
             fortifiable=self.fortifiable,
             fortify_score=self.fortify_score
+            tags=",".join(self.tags)
         )
 
         return b

@@ -113,7 +113,7 @@ class Rizin(Disassembler):
         props['entrypoint'] = self._pipe.cmdj('iej')[0]['vaddr']
         props['filename'] = os.path.basename(path)
         props['names'] = [os.path.basename(path)]
-        
+        props['dynamic_libs'] = self.get_dynamic_libs()
         self._bin = Binary(**props)
         self._bin.set_path(path)
         self._bin.set_disassembler(self)
@@ -231,6 +231,9 @@ class Rizin(Disassembler):
             bb.branches.add((BranchType.UnconditionalBranch, bb_data['jump']))
 
         return bb
+
+    def get_dynamic_libs(self):
+        return self._pipe.cmdj("ilj")
 
     def instruction(self, address: int) -> Instruction:
         self._pipe.cmd(f"s {address}")
