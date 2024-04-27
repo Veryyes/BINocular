@@ -420,6 +420,7 @@ class FunctionSource(BaseModel):
     _backend: Backend = Backend()
 
     lang:str = "C"
+    name:Optional[str] = None
     decompiled:bool
     source: str
 
@@ -428,7 +429,8 @@ class FunctionSource(BaseModel):
         return cls(
             lang=orm.lang,
             decompiled=orm.decompiled,
-            source=orm.source
+            source=orm.source,
+            name=orm.name
         )
 
     def orm(self):
@@ -436,7 +438,8 @@ class FunctionSource(BaseModel):
             sha256=self.sha256,
             lang=self.lang,
             decompiled=self.decompiled,
-            source=self.source
+            source=self.source,
+            name=self.name
         )
 
     def __hash__(self):

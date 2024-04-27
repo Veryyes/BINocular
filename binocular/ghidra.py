@@ -173,8 +173,6 @@ class Ghidra(Disassembler):
         return self.program.getAddressFactory().getDefaultAddressSpace().getAddress(offset)
 
     def _convert_func(self, f):
-        from ghidra.program.model.symbol import FlowType
-
         res = self.decomp.decompileFunction(f, self.decomp_timeout, self.monitor)
         high_func = res.getHighFunction()
         proto = high_func.getFunctionPrototype()
@@ -182,7 +180,8 @@ class Ghidra(Disassembler):
         decomp = res.getDecompiledFunction().getC()
         dsrc = FunctionSource(
             decompiled=True,
-            source = decomp
+            source = decomp,
+            name=f.getName()
         )
 
         func = Function(

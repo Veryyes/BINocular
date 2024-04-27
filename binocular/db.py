@@ -4,7 +4,6 @@ from typing import Optional, List
 
 from .consts import Endian, IL
 
-from sqlalchemy import create_engine, select
 from sqlalchemy import Table, Column, ForeignKey, String
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship
 from checksec.elf import PIEType, RelroType
@@ -81,7 +80,7 @@ class BinaryORM(Base):
     compiler: Mapped[Optional[str]]
     compilation_flags: Mapped[Optional[str]]
     
-    sha256:Mapped[str] = mapped_column(String(32))
+    sha256:Mapped[str] = mapped_column(String(32), unique=True)
     nx:Mapped[bool]
     pie:Mapped[PIEType]
     canary:Mapped[bool]
@@ -171,7 +170,8 @@ class SourceFunctionORM(Base):
     __tablename__ = "source"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    sha256:Mapped[str] = mapped_column(String(32))
+    name:Mapped[str] = mapped_column(index=True)
+    sha256:Mapped[str] = mapped_column(String(32), unique=True)
     lang: Mapped[str]
     decompiled:Mapped[bool]
     compiled_id: Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
