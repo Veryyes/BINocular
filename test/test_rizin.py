@@ -7,14 +7,14 @@ def test_disassm(make):
         assert g.is_installed()
         
         g.load("example")
-        b = g.binary()
+        b = g.binary
 
         assert 'example' in b.names
 
         strings = ["Need at least 1 cmd arg", "i use arch btw"]
         assert set(strings) <= b.strings
 
-        fs = set(g.functions())
+        fs = set(g.functions)
         fnames = [f.names for f in fs]
         assert 'main' in itertools.chain(*fnames)
         assert 'foo' in itertools.chain(*fnames)
@@ -31,7 +31,7 @@ def test_binary(make):
         assert g.is_installed()
         
         g.load("example")
-        b = g.binary()
+        b = g.binary
 
         borm = b.orm()
         assert b.architecture == borm.architecture
@@ -103,4 +103,4 @@ def test_function(make):
         assert f.pie == form.pie
         assert f.canary == form.canary
         assert f.return_type == form.return_type
-        assert ", ".join([" ".join(x) for x in f.argv]) == form.argv
+        assert ", ".join([str(x) for x in f.argv]) == form.argv

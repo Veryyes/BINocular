@@ -1,5 +1,7 @@
 
 from .primitives import (
+    Argument,
+    Branch,
     IR,
     Backend,
     Instruction,
@@ -10,10 +12,20 @@ from .primitives import (
     Binary
 )
 
+from .consts import (
+    Endian,
+    BranchType,
+    IL,
+    IndirectToken
+)
+
 from .ghidra import Ghidra
 from .rizin import Rizin
+from .disassembler import Disassembler
 
 __all__ = [
+    "Argument",
+    "Branch",
     "IR",
     "Backend",
     "Instruction",
@@ -23,5 +35,10 @@ __all__ = [
     "Section",
     "Binary",
     "Ghidra",
-    "Rizin"
+    "Rizin",
+    "Disassembler",
+    "Endian",
+    "BranchType",
+    "IL",
+    "IndirectToken",
 ]

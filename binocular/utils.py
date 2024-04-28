@@ -13,6 +13,8 @@ arches = [ArchAArch64, ArchAMD64, ArchARM, ArchARMCortexM, ArchARMEL, ArchARMEL,
 archinfo_lookup = defaultdict(lambda: ArchNotFound)
 for a in arches:
     archinfo_lookup[a.name] = a
+    archinfo_lookup[a.name.upper()] = a
+    archinfo_lookup[a.name.lower()] = a
     if hasattr(a, 'qemu_name'):
         archinfo_lookup[a.qemu_name] = a
     if hasattr(a, 'linux_name'):

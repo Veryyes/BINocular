@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union, Set, IO, Optional, Tuple, Iterable
+from typing import Dict, List, Union, Set, IO, Optional, Tuple, Iterable, Any
 from functools import cached_property
 from pathlib import Path
 import os
@@ -8,7 +8,7 @@ import tempfile
 import hashlib
 
 import networkx as nx
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, computed_field, model_validator
 from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 from sqlalchemy.engine.base import Engine
@@ -20,14 +20,6 @@ import pyvex
 from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo
 from .consts import Endian, BranchType, IL, IndirectToken
 from .utils import str2archinfo
-
-@dataclass
-class IR:
-    lang_name: IL
-    data: str
-
-class NoDBException(Exception):
-    pass
 
 class Backend:
     engine:Engine = None
@@ -46,6 +38,58 @@ class Backend:
     @property
     def db(self) -> Engine:
         return Backend.engine
+
+class NoDBException(Exception):
+    pass
+
+@dataclass
+class Branch:
+    btype: BranchType
+    target: Optional[int]
+
+    def __hash__(self):
+        return hash((self.btype, self.target))
+
+@dataclass
+class IR:
+    lang_name: IL
+    data: str
+
+class Argument(BaseModel):
+    '''Represents a single argument in a function'''
+    data_type: Optional[str]
+    var_name: Optional[str]
+    var_args: bool = False
+    # TODO pydantic alias fields
+    # so we can represent args in multiple langs?
+
+    # TODO add parsers and serializers for diff langs?
+
+    @model_validator(mode="before")
+    @classmethod
+    def from_literal(cls, data:Any) -> Any:
+        if isinstance(data, str):
+            if data == "...":
+                return Argument(
+                    data_type=None,
+                    var_name=None,
+                    var_args=True
+                )
+
+            data_type, var_name = data.strip().rsplit(" ", 1)
+            return Argument(
+                data_type=data_type,
+                var_name=var_name,
+            )
+        return data
+
+    def __str__(self):
+        if self.var_args:
+            return "..."
+
+        return f"{self.data_type} {self.var_name}"
+
+
 
 class NativeCode(BaseModel):
     endianness: Optional[Endian] = None
@@ -157,11 +201,11 @@ class BasicBlock(NativeCode):
     _backend: Backend = Backend()
     _function: Optional[Function] = None
 
-    address: Optional[int] = None
+    address: int = None
     pie:PIEType = None
 
     instructions: List[Instruction] = list()
-    branches: Set[Tuple[BranchType, int]] = set([])
+    branches: Set[Branch] = set()
     is_prologue: Optional[bool] = False
     is_epilogue: Optional[bool] = False
 
@@ -295,7 +339,7 @@ class Function(NativeCode):
     canary:Optional[bool] = None
     names:Optional[List[str]] = None
     return_type:Optional[str] = None
-    argv: List[Tuple[str, str]] = None
+    argv: List[Argument] = None
     sources: Set[FunctionSource] = set([])
     thunk:bool = False
 
@@ -320,7 +364,7 @@ class Function(NativeCode):
             canary=orm.canary,
             return_type=orm.return_type,
             thunk=orm.thunk,
-            argv=[tuple(arg.strip().rsplit(" ", 1)) for arg in orm.argv.split(",")],
+            argv=[Argument.from_literal(arg) for arg in orm.argv.split(",")],
         )
 
         for bb in orm.basic_blocks:
@@ -390,9 +434,9 @@ class Function(NativeCode):
             canary=self.canary,
             return_type=self.return_type,
             thunk=self.thunk,
-            argv=", ".join([f"{arg[0]} {arg[1]}" for arg in self.argv]),
-            
+            argv=", ".join(str(arg) for arg in self.argv)
         )
+
         for bb in self.basic_blocks:
             block_orm = bb.orm()
             func.basic_blocks.append(block_orm)
@@ -632,7 +676,7 @@ class Binary(NativeCode):
             fortify=self.fortify,
             fortified=self.fortified,
             fortifiable=self.fortifiable,
-            fortify_score=self.fortify_score
+            fortify_score=self.fortify_score,
             tags=",".join(self.tags)
         )
 
@@ -717,6 +761,9 @@ class Binary(NativeCode):
     @computed_field(repr=True)
     @property
     def functions(self) -> Iterable[Function]:
+        if self._functions is not None:
+            return self._functions
+
         if self._backend.db is not None:
             with Session(self._backend.db) as s:
                 # Weirdness w/ query building & cached property
@@ -727,11 +774,14 @@ class Binary(NativeCode):
                 bin_orm = s.execute(stmt).first()
                 if bin_orm is not None:
                     # TODO need to recover address :(
-                    return [Function.from_orm(f) for f in bin_orm[0].functions]
+                    self._functions = [Function.from_orm(f) for f in bin_orm[0].functions]
+                    return self._functions
         
         if self._backend.disassembler is not None:
-            return set(self._backend.disassembler.functions())
+            self._functions = self._backend.disassembler.functions
+            return self._functions
 
+        # Unable to recover or retrieve functions
         return set()
     
     def bytes(self) -> bytes:
