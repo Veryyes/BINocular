@@ -25,16 +25,16 @@
 ```python
 from sqlalchemy.orm import Session
 
-from binocular.ghidra import Ghidra
-from binocular.primitives import Backend
+from binocular import Ghidra, Backend
 
 Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
 
-with Ghidra(save_on_close=True) as g:
+with Ghidra() as g:
     assert g.is_installed()
     g.load("/bin/ls")
     
-    b = g.binary()
+    b = g.binary
+    print(b.architecture)
 
     with Session(Backend.engine) as s:
         b.db_add(s)
