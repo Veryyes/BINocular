@@ -170,7 +170,7 @@ class SourceFunctionORM(Base):
     __tablename__ = "source"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name:Mapped[str] = mapped_column(index=True)
+    name:Mapped[str] = mapped_column(String(64), index=True)
     sha256:Mapped[str] = mapped_column(String(32), unique=True)
     lang: Mapped[str]
     decompiled:Mapped[bool]

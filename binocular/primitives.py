@@ -245,7 +245,10 @@ class BasicBlock(NativeCode):
             if self.idx >= len(self.blocks):
                 raise StopIteration
 
-            btype, addr = self.blocks[self.idx]
+            branch_data = self.blocks[self.idx]
+            btype = branch_data.btype
+            addr = branch_data.target
+
             target_bb = self.block_cache.get(addr, None)
             if addr is None:
                 # Statically Unknown Branch Location (e.g. indirect jump)
@@ -441,8 +444,8 @@ class Function(NativeCode):
             block_orm = bb.orm()
             func.basic_blocks.append(block_orm)
             block_orm.function = func
-
-        for src in self.sources:
+        
+        for src in self.sources:    
             src_orm = src.orm()
             func.sources.append(src_orm)
             src_orm.function = func
@@ -464,7 +467,7 @@ class FunctionSource(BaseModel):
     _backend: Backend = Backend()
 
     lang:str = "C"
-    name:Optional[str] = None
+    name:str
     decompiled:bool
     source: str
 
@@ -479,11 +482,11 @@ class FunctionSource(BaseModel):
 
     def orm(self):
         return SourceFunctionORM(
+            name=self.name,
             sha256=self.sha256,
             lang=self.lang,
             decompiled=self.decompiled,
             source=self.source,
-            name=self.name
         )
 
     def __hash__(self):
@@ -497,18 +500,6 @@ class FunctionSource(BaseModel):
 
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
-
-    def orm(self, compiled_func:Function=None):
-        src = SourceFunctionORM(
-            sha256=self.sha256,
-            lang=self.lang,
-            decompiled=self.decompiled,
-            source=self.source
-        )
-        if compiled_func is not None:
-            src.compiled = compiled_func.orm()
-
-        return src
 
     def commit(self):
         if self._backend.db is None:
