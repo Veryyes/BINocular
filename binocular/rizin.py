@@ -201,7 +201,7 @@ class Rizin(Disassembler):
         for func_calls in call_data:
             for call in func_calls['calls']:
                 self._callee_cache[func_calls['addr']].add(call['addr'])
-                self._caller_cache[call['addr']] = func_calls['addr']
+                self._caller_cache[call['addr']].add(func_calls['addr'])
 
     def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
         return self._caller_cache[addr]
