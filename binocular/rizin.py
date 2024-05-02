@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 from collections.abc import Iterable
+from collections import defaultdict
 from typing import Any, Optional, Tuple, List, Union
 from pathlib import Path
 from functools import lru_cache
@@ -30,6 +31,8 @@ class Rizin(Disassembler):
 
         self._bin_info = None
         self._thunk_dict = dict()
+        self._caller_cache = defaultdict(lambda: set())
+        self._callee_cache = defaultdict(lambda: set())
 
     def close(self):
         '''Release/Free up any resources'''
@@ -41,10 +44,6 @@ class Rizin(Disassembler):
         Currently only supports sections within an ELF file.
         '''
         return list()
-
-    ####################
-    # Please Implement #
-    ####################
 
     def analyze(self, path) -> bool:
         '''
@@ -112,6 +111,14 @@ class Rizin(Disassembler):
             print(err)
 
         assert self.is_installed()
+
+    def _pre_normalize(self, path):
+        self._func_call_cache()
+
+    def _post_normalize(self):
+        del self._caller_cache
+        del self._callee_cache
+        del self._thunk_dict
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
@@ -188,6 +195,19 @@ class Rizin(Disassembler):
                 var_name=arg['name']
             ) for arg in signature['args']
         ]
+
+    def _func_call_cache(self):
+        call_data = self._pipe.cmdj("aflmj")
+        for func_calls in call_data:
+            for call in func_calls['calls']:
+                self._callee_cache[func_calls['addr']].add(call['addr'])
+                self._caller_cache[call['addr']] = func_calls['addr']
+
+    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        return self._caller_cache[addr]
+
+    def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        return self._callee_cache[addr]
     
     def get_func_return_type(self, addr:int, func_ctxt:Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''

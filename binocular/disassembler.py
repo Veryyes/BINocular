@@ -81,8 +81,6 @@ class Disassembler(ABC):
                 argv=self.get_func_args(addr, func_ctxt),
                 thunk=self.is_func_thunk(addr, func_ctxt)
             )
-            
-            
 
             decompiled_code = self.get_func_decomp(addr, func_ctxt)
             dsrc = None
@@ -116,7 +114,6 @@ class Disassembler(ABC):
                 if callee is not None:
                     f.calls.add(callee)
                 
-            
 
     def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
