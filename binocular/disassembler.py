@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, Dict
 
 from .primitives import (BasicBlock, Binary, Function, FunctionSource,
                          Instruction, Section, Argument, Branch, IR)
@@ -17,10 +17,10 @@ class Disassembler(ABC):
         pass
 
     def __init__(self):
-        self._func_names = dict()
-        self._func_addrs = dict()
-        self._bbs = dict()
-        self._instrs = dict()
+        self._func_names:Dict[str, Function] = dict()
+        self._func_addrs:Dict[int, Function] = dict()
+        self._bbs:Dict[int, BasicBlock] = dict()
+        self._instrs:Dict[int, Instruction] = dict()
 
     def __enter__(self):
         return self.open()
@@ -33,8 +33,17 @@ class Disassembler(ABC):
         self._binary_filepath = path
         if not self.analyze(self._binary_filepath):
             raise Disassembler.FailedToLoadBinary
+
+        self._pre_normalize(path)
         self._create_binary()
         self._create_functions()
+        self._post_normalize()
+
+    def _pre_normalize(self, path):
+        pass
+
+    def _post_normalize(self):
+        pass
 
     def _create_binary(self):
         sections = self.get_sections()
@@ -72,6 +81,8 @@ class Disassembler(ABC):
                 argv=self.get_func_args(addr, func_ctxt),
                 thunk=self.is_func_thunk(addr, func_ctxt)
             )
+            
+            
 
             decompiled_code = self.get_func_decomp(addr, func_ctxt)
             dsrc = None
@@ -89,6 +100,23 @@ class Disassembler(ABC):
 
             self._func_addrs[addr] = f
             self._func_names[func_name] = f
+
+        # 2nd pass to do callee/callers & xrefs
+        for func_ctxt in self.get_func_iterator():
+            addr = self.get_func_addr(func_ctxt)
+            f = self._func_addrs[addr]
+
+            for caller_addr in self.get_func_callers(addr, func_ctxt):
+                caller = self._func_addrs.get(caller_addr, None)
+                if caller is not None:
+                    f.callers.add(caller)
+            
+            for callee_addr in self.get_func_callees(addr, func_ctxt):
+                callee = self._func_addrs.get(callee_addr, None)
+                if callee is not None:
+                    f.calls.add(callee)
+                
+            
 
     def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
@@ -269,6 +297,16 @@ class Disassembler(ABC):
     @abstractmethod
     def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        '''Return the address to functions that call func_ctxt'''
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        '''Return the address to functions that are called in func_ctxt'''
         raise NotImplementedError
     
     @abstractmethod

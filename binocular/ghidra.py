@@ -113,6 +113,7 @@ class Ghidra(Disassembler):
         self.base_addr = self.program.getImageBase()
         self.fm = self.program.getFunctionManager()
         self.st = self.program.getSymbolTable()
+        self.ref_m = self.program.getReferenceManager()
         self.lang_description = self.program.getLanguage().getLanguageDescription()
         self.bb_model = BasicBlockModel(self.program)
         self.listing = self.program.getListing()
@@ -235,6 +236,8 @@ class Ghidra(Disassembler):
         proto = high_func.getFunctionPrototype()
 
         # TODO handle var args
+        # if func_ctxt.hasVarArgs() ...
+
         return [
             Argument(
                 data_type = str(proto.getParam(i).getDataType()),
@@ -259,6 +262,21 @@ class Ghidra(Disassembler):
         decomp_res = self._decompile(func_ctxt)
         return decomp_res.getDecompiledFunction().getC()
     
+    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        refs = self.ref_m.getReferencesTo(self._mk_addr(addr))
+        for ref in refs:
+            if ref.getReferenceType().isCall():
+                yield ref.getFromAddress().getOffset()
+        
+    def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        for addr in func_ctxt.getBody().getAddresses(True):
+            refs = self.ref_m.getReferencesFrom(addr)
+            for ref in refs:
+                if ref.getReferenceType().isCall():
+                    yield ref.getToAddress().getOffset()
+
+        
+
     def get_func_bb_iterator(self, addr:int, func_ctxt:Any) -> Iterable[Any]:
         '''
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
