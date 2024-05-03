@@ -18,7 +18,7 @@ import pyvex
 
 
 from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo
-from .consts import Endian, BranchType, IL, IndirectToken
+from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 
 class Backend:
@@ -41,6 +41,13 @@ class Backend:
 
 class NoDBException(Exception):
     pass
+
+@dataclass
+class Reference:
+    from_: int 
+    to: int
+    type: RefType
+
 
 @dataclass
 class Branch:
@@ -89,8 +96,6 @@ class Argument(BaseModel):
 
         return f"{self.data_type} {self.var_name}"
 
-
-
 class NativeCode(BaseModel):
     endianness: Optional[Endian] = None
     architecture: Optional[str] = None
@@ -123,9 +128,6 @@ class Instruction(NativeCode):
     asm: Optional[str] = ""
     comment: Optional[str] = ""
     ir: Optional[IR] = None
-
-    xref_to: List[int] = list()
-    xref_from: List[int] = list()
 
     @classmethod
     def from_orm(cls, orm):
@@ -208,10 +210,8 @@ class BasicBlock(NativeCode):
     branches: Set[Branch] = set()
     is_prologue: Optional[bool] = False
     is_epilogue: Optional[bool] = False
-
-    xref_to: List[int] = list()
-    xref_from: List[int] = list()
-
+    xrefs:Set[Reference] = set([])
+    
     _size_bytes: int = None
     
     @classmethod
@@ -353,8 +353,8 @@ class Function(NativeCode):
     calls: Optional[Set[Function]] = set([])
     callers: Optional[Set[Function]] = set([])
 
-    xref_to: Optional[List[int]] = list()
-    xref_from: Optional[List[int]] = list()
+    # xref_to: Optional[List[int]] = list()
+    # xref_from: Optional[List[int]] = list()
 
     @classmethod
     def from_orm(cls, orm):
@@ -419,6 +419,10 @@ class Function(NativeCode):
 
             if isinstance(dest, BasicBlock):
                 self._cfg(history, block_cache, g, dest)
+
+    @cached_property
+    def xrefs(self) -> Set[Reference]:
+        raise NotImplementedError
 
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler

@@ -16,6 +16,20 @@ class IL(Enum):
     ESIL = 1
     PCODE = 2
 
+class RefType(Enum):
+    UNKNOWN = 0
+    # Normal Branch
+    JUMP = 1 
+    # Function Call
+    CALL = 2
+    # Read Data
+    READ = 3
+    # Write Data
+    WRITE = 4
+    # Read or Write (Disassembler doesn't say which) 
+    DATA = 5
+    
+
 class IndirectToken:
     '''A Token to represent a Dynamically Determined Value'''
     pass

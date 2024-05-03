@@ -13,8 +13,8 @@ from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
 from pyhidra.core import _setup_project, _analyze_program
 
 from .disassembler import Disassembler
-from .primitives import Section,Instruction, IR, Argument, Branch
-from .consts import Endian, IL, BranchType
+from .primitives import Section,Instruction, IR, Argument, Branch, Reference
+from .consts import Endian, IL, BranchType, RefType
 
 class Ghidra(Disassembler):
     
@@ -275,7 +275,37 @@ class Ghidra(Disassembler):
                 if ref.getReferenceType().isCall():
                     yield ref.getToAddress().getOffset()
 
-        
+    def _parse_ref_type(self, type):
+        if type.isCall():
+            return RefType.CALL
+        elif type.isJump():
+            return RefType.JUMP
+        elif type.isRead():
+            return RefType.READ
+        elif type.isWrite():
+            return RefType.WRITE
+        else:
+            return RefType.UNKNOWN
+
+    def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
+        for addr in func_ctxt.getBody().getAddresses(True):
+            from_refs = self.ref_m.getReferencesFrom(addr)
+            for ref in from_refs:
+                ref_type = ref.getReferenceType()
+                yield Reference(
+                    from_ = ref.getFromAddress.getOffset(),
+                    to = ref.getToAddress.getOffset(),
+                    type = self._parse_ref_type(ref_type)
+                )
+
+            to_refs = self.ref_m.getReferencesTo(addr)
+            for ref in to_refs:
+                ref_type = ref.getReferenceType()
+                yield Reference(
+                    from_ = ref.getFromAddress.getOffset(),
+                    to = ref.getToAddress.getOffset(),
+                    type = self._parse_ref_type(ref_type)
+                )
 
     def get_func_bb_iterator(self, addr:int, func_ctxt:Any) -> Iterable[Any]:
         '''

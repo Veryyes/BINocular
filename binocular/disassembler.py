@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any, Optional, Tuple, List, Dict
 
 from .primitives import (BasicBlock, Binary, Function, FunctionSource,
-                         Instruction, Section, Argument, Branch, IR)
+                         Instruction, Section, Argument, Branch, IR, Reference)
 
 from .consts import Endian
 
@@ -304,6 +304,10 @@ class Disassembler(ABC):
     @abstractmethod
     def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
         '''Return the address to functions that are called in func_ctxt'''
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
         raise NotImplementedError
     
     @abstractmethod

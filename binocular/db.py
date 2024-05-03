@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from .consts import Endian, IL
+from .consts import Endian, IL, RefType
 
 from sqlalchemy import Table, Column, ForeignKey, String
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship
@@ -100,7 +100,6 @@ class BinaryORM(Base):
         back_populates='binaries'
     )
 
-
 class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
@@ -140,7 +139,18 @@ class BasicBlockORM(Base):
     function_id:Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
     function:Mapped[NativeFunctionORM] = relationship(back_populates='basic_blocks')
     instructions:Mapped[List[InstructionORM]] = relationship(back_populates='basic_block')
+    references:Mapped[List[ReferenceORM]] = relationship(back_populates='basic_block')
 
+class ReferenceORM(Base):
+    __tablename__ = "references"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_addr: Mapped[int]
+    to_addr: Mapped[int]
+    type: RefType
+    basic_block_id:Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
+    basic_block:Mapped[BasicBlockORM] = relationship(back_populates='references')
+    
 class InstructionORM(Base):
     __tablename__ = "instructions"
     
