@@ -278,14 +278,14 @@ class Ghidra(Disassembler):
     def _parse_ref_type(self, type):
         if type.isCall():
             return RefType.CALL
-        elif type.isJump():
+        if type.isJump():
             return RefType.JUMP
-        elif type.isRead():
+        if type.isRead():
             return RefType.READ
-        elif type.isWrite():
+        if type.isWrite():
             return RefType.WRITE
-        else:
-            return RefType.UNKNOWN
+        
+        return RefType.UNKNOWN
 
     def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
         for addr in func_ctxt.getBody().getAddresses(True):

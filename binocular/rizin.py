@@ -11,7 +11,7 @@ import pkgutil
 import binascii
 
 from .disassembler import Disassembler
-from .primitives import Section, Function, BasicBlock, Instruction, IR, Branch, Argument
+from .primitives import Section, Instruction, IR, Branch, Argument, Reference, RefType
 from .consts import Endian, BranchType, IL
 from .utils import run_proc
 
@@ -208,6 +208,26 @@ class Rizin(Disassembler):
 
     def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
         return self._callee_cache[addr]
+
+    def _parse_xref_type(self, type):
+        if type == 'CODE':
+            return RefType.JUMP
+        if type == 'CALL':
+            return RefType.CALL
+        if type == 'DATA' or type == 'STRING':
+            return RefType.DATA
+
+        return RefType.UNKNOWN
+
+    def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
+        self._pipe.cmd(f"s {addr}")
+        xref_data = self._pipe.cmdj("afxj")
+        for xref in xref_data:
+            yield Reference(
+                to=xref['to'],
+                from_=xref['from'],
+                type=self._parse_xref_type(xref['type'])
+            )
     
     def get_func_return_type(self, addr:int, func_ctxt:Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''

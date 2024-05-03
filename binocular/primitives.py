@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 import pyvex
 
 
-from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo
+from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 
@@ -42,12 +42,6 @@ class Backend:
 class NoDBException(Exception):
     pass
 
-@dataclass
-class Reference:
-    from_: int 
-    to: int
-    type: RefType
-
 
 @dataclass
 class Branch:
@@ -61,6 +55,26 @@ class Branch:
 class IR:
     lang_name: IL
     data: str
+
+class Reference:
+    from_: int 
+    to: int
+    type: RefType
+
+    @classmethod
+    def from_orm(cls, orm):
+        return cls(
+            from_ = orm.from_addr,
+            to = orm.to_addr, 
+            type = orm.type
+        )
+
+    def orm(self):
+        return ReferenceORM(
+            from_addr = self.from_,
+            to_addr = self.to,
+            type=self.type
+        )
 
 class Argument(BaseModel):
     '''Represents a single argument in a function'''
@@ -221,6 +235,7 @@ class BasicBlock(NativeCode):
             endianness=orm.endianness,
             bitness=orm.bitness,
             pie=orm.pie,
+            xrefs = set(Reference.from_orm(ref) for ref in orm.references)
         )
 
         for instr_orm in orm.instructions:
@@ -315,6 +330,7 @@ class BasicBlock(NativeCode):
             bitness=self.bitness,
             pie=self.pie,
             size=len(self),
+            references = [xref.orm() for xref in self.xrefs]
         )
 
         for instr in self.instructions:
