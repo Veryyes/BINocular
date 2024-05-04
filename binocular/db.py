@@ -139,7 +139,7 @@ class BasicBlockORM(Base):
     function_id:Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
     function:Mapped[NativeFunctionORM] = relationship(back_populates='basic_blocks')
     instructions:Mapped[List[InstructionORM]] = relationship(back_populates='basic_block')
-    references:Mapped[List[ReferenceORM]] = relationship(back_populates='basic_block')
+    xrefs:Mapped[List[ReferenceORM]] = relationship(back_populates='basic_block')
 
 class ReferenceORM(Base):
     __tablename__ = "references"
@@ -147,9 +147,9 @@ class ReferenceORM(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     from_addr: Mapped[int]
     to_addr: Mapped[int]
-    type: RefType
+    type: Mapped[RefType]
     basic_block_id:Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
-    basic_block:Mapped[BasicBlockORM] = relationship(back_populates='references')
+    basic_block:Mapped[BasicBlockORM] = relationship(back_populates='xrefs')
     
 class InstructionORM(Base):
     __tablename__ = "instructions"

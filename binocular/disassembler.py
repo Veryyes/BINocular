@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import os
+import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any, Optional, Tuple, List, Dict
+
+import coloredlogs
 
 from .primitives import (BasicBlock, Binary, Function, FunctionSource,
                          Instruction, Section, Argument, Branch, IR, Reference)
 
 from .consts import Endian
+
+logger = logging.getLogger(__name__)
+coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class Disassembler(ABC):
     class FailedToLoadBinary(Exception):
@@ -16,7 +23,10 @@ class Disassembler(ABC):
     class ArchitectureNotSupported(Exception):
         pass
 
-    def __init__(self):
+    def __init__(self, verbose=True):
+        self.verbose=verbose
+
+        self._bb_count = 0
         self._func_names:Dict[str, Function] = dict()
         self._func_addrs:Dict[int, Function] = dict()
         self._bbs:Dict[int, BasicBlock] = dict()
@@ -28,16 +38,25 @@ class Disassembler(ABC):
     def __exit__(self, type, value, tb):
         self.close()
 
+    def disassm_name(self):
+        return self.__class__.__name__
+
     def load(self, path):
         '''Load a binary into the disassembler and trigger any default analysis'''
+        logger.info(f"[{self.disassm_name()}] Analyzing {path}")
         self._binary_filepath = path
+
+        start = time.time()
         if not self.analyze(self._binary_filepath):
             raise Disassembler.FailedToLoadBinary
+        logger.info(f"[{self.disassm_name()}] Analysis Complete: {time.time() - start:.2f}s")
 
+        start=time.time()
         self._pre_normalize(path)
         self._create_binary()
         self._create_functions()
         self._post_normalize()
+        logger.info(f"[{self.disassm_name()}] Parsing Complete: {time.time() - start:.2f}s")
 
     def _pre_normalize(self, path):
         pass
@@ -46,6 +65,8 @@ class Disassembler(ABC):
         pass
 
     def _create_binary(self):
+        start = time.time()
+
         sections = self.get_sections()
         self.binary = Binary(
             sections=sections,
@@ -64,7 +85,12 @@ class Disassembler(ABC):
 
         self.functions = set()
 
+        logger.info(f"[{self.disassm_name()}] Binary Data Loaded: {time.time() - start:.2f}s")
+
     def _create_functions(self):
+        start = time.time()
+
+        count = 0
         for func_ctxt in self.get_func_iterator():
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
@@ -81,6 +107,7 @@ class Disassembler(ABC):
                 argv=self.get_func_args(addr, func_ctxt),
                 thunk=self.is_func_thunk(addr, func_ctxt)
             )
+            count += 1
 
             decompiled_code = self.get_func_decomp(addr, func_ctxt)
             dsrc = None
@@ -114,11 +141,18 @@ class Disassembler(ABC):
                 if callee is not None:
                     f.calls.add(callee)
                 
+        run_time = time.time() - start
+        logger.info(f"[{self.disassm_name()}] {self._bb_count} Basic Blocks Loaded")
+        
+        logger.info(f"[{self.disassm_name()}] {count} Functions Loaded")
+        logger.info(f"[{self.disassm_name()}] Function Data Loaded: {run_time:.2f}s")
+        logger.info(f"[{self.disassm_name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
     def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
             bb_addr = self.get_bb_addr(bb_ctxt, func_ctxt)
                 
+            self._bb_count += 1
             bb = BasicBlock(
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
@@ -139,7 +173,7 @@ class Disassembler(ABC):
             bb.set_function(f)
 
             self._bbs[bb_addr] = bb
-
+    
     def _create_instructions(self, bb_addr:int, bb_ctxt:Any, bb:BasicBlock, func_ctxt:Any):
         cur_addr = bb_addr
         for data, asm in self.get_bb_instructions(bb_addr, bb_ctxt, func_ctxt):

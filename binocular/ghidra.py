@@ -22,8 +22,8 @@ class Ghidra(Disassembler):
     RELEASE_URL = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0.2_build/ghidra_11.0.2_PUBLIC_20240326.zip"
     DEFAULT_PROJECT_PATH = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
 
-    def __init__(self, project_path:str=None, ghidra_home=None, save_on_close=False):
-        super().__init__()
+    def __init__(self, verbose=True, project_path:str=None, ghidra_home=None, save_on_close=False):
+        super().__init__(verbose=verbose)
 
         self.project = None
         self.program = None

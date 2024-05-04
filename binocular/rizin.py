@@ -24,8 +24,8 @@ class Rizin(Disassembler):
     GIT_REPO = "https://github.com/rizinorg/rizin.git"
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'rizin')
 
-    def __init__(self, rizin_home:str=None) -> None:
-        super().__init__()
+    def __init__(self, verbose=True, rizin_home:str=None) -> None:
+        super().__init__(verbose=verbose)
         self.rizin_home = rizin_home
         self._pipe = None
 

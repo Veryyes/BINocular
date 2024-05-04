@@ -56,7 +56,7 @@ class IR:
     lang_name: IL
     data: str
 
-class Reference:
+class Reference(BaseModel):
     from_: int 
     to: int
     type: RefType

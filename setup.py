@@ -13,6 +13,7 @@ setup(
         'archinfo'
         'checksec-py',
         'SQLAlchemy',
+        'coloredlogs'
         'archinfo',
         'pyvex',
         'GitPython',
