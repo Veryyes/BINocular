@@ -779,6 +779,19 @@ class Binary(NativeCode):
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
 
+    @cached_property
+    def call_graph(self) -> nx.MultiDiGraph:
+        g = nx.MultiDiGraph()
+        for f in self.functions:
+            g.add_node(f)
+            for child_f in f.calls:
+                g.add_node(child_f)
+                g.add_edge(f, child_f)
+            for parent_f in f.callers:
+                g.add_node(parent_f)
+                g.add_edge(f, parent_f)
+        return g
+
     @computed_field(repr=False)
     @cached_property
     def sha256(self) -> str:
@@ -848,6 +861,7 @@ class Binary(NativeCode):
 
         if self._backend.db is not None:
             with Session(self._backend.db) as s:
+                # TODO check if binary is even in db first
                 # Weirdness w/ query building & cached property
                 # warm cache up before building query or else it breaks
                 self.sha256
