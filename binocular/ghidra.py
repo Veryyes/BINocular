@@ -266,7 +266,10 @@ class Ghidra(Disassembler):
         refs = self.ref_m.getReferencesTo(self._mk_addr(addr))
         for ref in refs:
             if ref.getReferenceType().isCall():
-                yield ref.getFromAddress().getOffset()
+                call_addr = ref.getFromAddress()
+                caller = self.fm.getFunctionContaining(call_addr)
+                if caller is not None:
+                    yield caller.getEntryPoint().getOffset()
         
     def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
         for addr in func_ctxt.getBody().getAddresses(True):
@@ -293,8 +296,8 @@ class Ghidra(Disassembler):
             for ref in from_refs:
                 ref_type = ref.getReferenceType()
                 yield Reference(
-                    from_ = ref.getFromAddress.getOffset(),
-                    to = ref.getToAddress.getOffset(),
+                    from_ = ref.getFromAddress().getOffset(),
+                    to = ref.getToAddress().getOffset(),
                     type = self._parse_ref_type(ref_type)
                 )
 
@@ -302,8 +305,8 @@ class Ghidra(Disassembler):
             for ref in to_refs:
                 ref_type = ref.getReferenceType()
                 yield Reference(
-                    from_ = ref.getFromAddress.getOffset(),
-                    to = ref.getToAddress.getOffset(),
+                    from_ = ref.getFromAddress().getOffset(),
+                    to = ref.getToAddress().getOffset(),
                     type = self._parse_ref_type(ref_type)
                 )
 

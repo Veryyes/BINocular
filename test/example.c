@@ -31,6 +31,17 @@ char* foo(char* input, int len)
     return input;
 }
 
+int fib(int x)
+{
+    if (x==0)
+        return 0;
+
+    if (x==1)
+        return 1;
+
+    return fib(x-1) + fib(x-2);
+}
+
 int main(int argc, char** argv)
 {
     char* global_str = "i use arch btw";
@@ -47,5 +58,7 @@ int main(int argc, char** argv)
     input = foo(input, len);
 
     printf("%s\n", input);
+    printf("fib (5) = %d\n", fib(5));
+
     return 0;
 }

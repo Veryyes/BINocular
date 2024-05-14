@@ -2,9 +2,8 @@
 from __future__ import annotations
 from collections.abc import Iterable
 from collections import defaultdict
-from typing import Any, Optional, Tuple, List, Union
+from typing import Any, Optional, Tuple, List
 from pathlib import Path
-from functools import lru_cache
 import os
 import shutil
 import pkgutil
@@ -32,7 +31,7 @@ class Rizin(Disassembler):
         self._bin_info = None
         self._thunk_dict = dict()
         self._caller_cache = defaultdict(lambda: set())
-        self._callee_cache = defaultdict(lambda: set())
+        self._calls_cache = defaultdict(lambda: set())
 
     def close(self):
         '''Release/Free up any resources'''
@@ -112,13 +111,11 @@ class Rizin(Disassembler):
 
         assert self.is_installed()
 
-    def _pre_normalize(self, path):
-        self._func_call_cache()
-
     def _post_normalize(self):
         del self._caller_cache
-        del self._callee_cache
+        del self._calls_cache
         del self._thunk_dict
+
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
@@ -196,18 +193,15 @@ class Rizin(Disassembler):
             ) for arg in signature['args']
         ]
 
-    def _func_call_cache(self):
-        call_data = self._pipe.cmdj("aflmj")
-        for func_calls in call_data:
-            for call in func_calls['calls']:
-                self._callee_cache[func_calls['addr']].add(call['addr'])
-                self._caller_cache[call['addr']].add(func_calls['addr'])
-
-    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
-        return self._caller_cache[addr]
+    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:        
+        '''Return the address to functions that call func_ctxt'''
+        for call_addr in self._caller_cache[addr]:
+            yield call_addr
 
     def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
-        return self._callee_cache[addr]
+        '''Return the address to functions that are called in func_ctxt'''
+        for callee_addr in self._calls_cache[addr]:
+            yield callee_addr
 
     def _parse_xref_type(self, type):
         if type == 'CODE':
@@ -223,6 +217,10 @@ class Rizin(Disassembler):
         self._pipe.cmd(f"s {addr}")
         xref_data = self._pipe.cmdj("afxj")
         for xref in xref_data:
+            if xref['type'] == 'CALL':
+                self._calls_cache[addr].add(xref['to'])
+                self._caller_cache[xref['to']].add(addr)
+
             yield Reference(
                 to=xref['to'],
                 from_=xref['from'],
@@ -252,7 +250,6 @@ class Rizin(Disassembler):
         any weirdness with how a disassembler's API may work.
         '''
         self._pipe.cmd(f"s {addr}")
-
         for bb in self._pipe.cmdj('afbj'):
             yield bb
 

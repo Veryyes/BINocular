@@ -104,3 +104,12 @@ def test_function(make):
         assert f.canary == form.canary
         assert f.return_type == form.return_type
         assert ", ".join([str(x) for x in f.argv]) == form.argv
+
+        f = g.function_sym('main')
+        assert g.function_sym('foo') in f.calls
+        assert g.function_sym('fib') in f.calls
+        
+        # Recursive, so itself should be a caller and calls
+        f = g.function_sym('fib')
+        assert f in f.callers
+        assert f in f.calls

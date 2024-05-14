@@ -119,16 +119,19 @@ class Disassembler(ABC):
                 )
                 f.sources.add(dsrc)
 
-            self._create_basicblocks(addr, func_ctxt, f)
+            xrefs = set(self.get_func_xrefs(addr, func_ctxt))
+
+            self._create_basicblocks(addr, func_ctxt, f, xrefs)
         
             self.functions.add(f)
 
             self._func_addrs[addr] = f
             self._func_names[func_name] = f
-
-        # 2nd pass to do callee/callers & xrefs
+        
+        # 2nd pass to do callee/callers
         for func_ctxt in self.get_func_iterator():
             addr = self.get_func_addr(func_ctxt)
+            func_name = self.get_func_name(addr, func_ctxt)
             f = self._func_addrs[addr]
 
             for caller_addr in self.get_func_callers(addr, func_ctxt):
@@ -140,7 +143,7 @@ class Disassembler(ABC):
                 callee = self._func_addrs.get(callee_addr, None)
                 if callee is not None:
                     f.calls.add(callee)
-                
+
         run_time = time.time() - start
         logger.info(f"[{self.disassm_name()}] {self._bb_count} Basic Blocks Loaded")
         
@@ -148,7 +151,7 @@ class Disassembler(ABC):
         logger.info(f"[{self.disassm_name()}] Function Data Loaded: {run_time:.2f}s")
         logger.info(f"[{self.disassm_name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
-    def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function):
+    def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function, xrefs:Set[Reference]):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
             bb_addr = self.get_bb_addr(bb_ctxt, func_ctxt)
                 
@@ -169,10 +172,18 @@ class Disassembler(ABC):
 
             self._create_instructions(bb_addr, bb_ctxt, bb, func_ctxt)
 
+            for xref in xrefs:
+                if xref.from_ in bb or xref.to in bb:
+                    bb.xrefs.add(xref)
+            xrefs -= bb.xrefs
+            
             f.basic_blocks.add(bb)
             bb.set_function(f)
 
             self._bbs[bb_addr] = bb
+
+        if len(xrefs) > 0 and len(f.basic_blocks) > 0:
+            logger.warn(f"[{self.disassm_name()}] {len(xrefs)} XRefs not in function: {xrefs}")
     
     def _create_instructions(self, bb_addr:int, bb_ctxt:Any, bb:BasicBlock, func_ctxt:Any):
         cur_addr = bb_addr
@@ -342,6 +353,7 @@ class Disassembler(ABC):
 
     @abstractmethod
     def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
+        '''Returns an iterable of references within a function'''
         raise NotImplementedError
     
     @abstractmethod

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union, Set, IO, Optional, Tuple, Iterable, Any
+from typing import Dict, List, Union, Set, IO, Optional, Tuple, Iterable, Any, Type
 from functools import cached_property
 from pathlib import Path
 import os
 import tempfile
 import hashlib
+import itertools
 
 import networkx as nx
 from pydantic import BaseModel, computed_field, model_validator
@@ -62,12 +63,19 @@ class Reference(BaseModel):
     type: RefType
 
     @classmethod
+    def orm_type(cls) -> Type:
+        return ReferenceORM
+
+    @classmethod
     def from_orm(cls, orm):
         return cls(
             from_ = orm.from_addr,
             to = orm.to_addr, 
             type = orm.type
         )
+
+    def __hash__(self):
+        return hash ((self.from_, self.to, self.type.value))
 
     def orm(self):
         return ReferenceORM(
@@ -142,6 +150,10 @@ class Instruction(NativeCode):
     asm: Optional[str] = ""
     comment: Optional[str] = ""
     ir: Optional[IR] = None
+
+    @classmethod
+    def orm_type(cls) -> Type:
+        return InstructionORM
 
     @classmethod
     def from_orm(cls, orm):
@@ -227,6 +239,10 @@ class BasicBlock(NativeCode):
     xrefs:Set[Reference] = set([])
     
     _size_bytes: int = None
+
+    @classmethod
+    def orm_type(cls) -> Type:
+        return BasicBlockORM
     
     @classmethod
     def from_orm(cls, orm):
@@ -235,7 +251,7 @@ class BasicBlock(NativeCode):
             endianness=orm.endianness,
             bitness=orm.bitness,
             pie=orm.pie,
-            xrefs = set(Reference.from_orm(ref) for ref in orm.references)
+            xrefs = set(Reference.from_orm(ref) for ref in orm.xrefs)
         )
 
         for instr_orm in orm.instructions:
@@ -289,11 +305,13 @@ class BasicBlock(NativeCode):
             self._size_bytes = sum([len(i) for i in self.instructions])            
         return self._size_bytes
 
-    def __contains__(self, x:Union[Instruction, bytes]):
+    def __contains__(self, x:Union[Instruction, bytes, int]):
         if isinstance(x, Instruction):
             return x in self.instructions
         elif isinstance(x, bytes):
             return x in self.bytes
+        elif isinstance(x, int):
+            return x >= self.address and x <= (self.address + len(self))
         raise TypeError
 
     def set_disassembler(self, disassembler:"Disassembler"):
@@ -330,7 +348,7 @@ class BasicBlock(NativeCode):
             bitness=self.bitness,
             pie=self.pie,
             size=len(self),
-            references = [xref.orm() for xref in self.xrefs]
+            xrefs = [xref.orm() for xref in self.xrefs]
         )
 
         for instr in self.instructions:
@@ -362,15 +380,16 @@ class Function(NativeCode):
     sources: Set[FunctionSource] = set([])
     thunk:bool = False
 
-    basic_blocks: Optional[Set[BasicBlock]] = set([])
+    basic_blocks: Set[BasicBlock] = set([])
     start: BasicBlock = None
     end: Set[BasicBlock] = set([])
     
-    calls: Optional[Set[Function]] = set([])
-    callers: Optional[Set[Function]] = set([])
+    calls: Set[Function] = set([])
+    callers: Set[Function] = set([])
 
-    # xref_to: Optional[List[int]] = list()
-    # xref_from: Optional[List[int]] = list()
+    @classmethod
+    def orm_type(cls) -> Type:
+        return NativeFunctionORM
 
     @classmethod
     def from_orm(cls, orm):
@@ -381,9 +400,12 @@ class Function(NativeCode):
             bitness=orm.bitness,
             pie=orm.pie,
             canary=orm.canary,
+            sha256=orm.sha256,
             return_type=orm.return_type,
             thunk=orm.thunk,
             argv=[Argument.from_literal(arg) for arg in orm.argv.split(",")],
+            calls=set(orm.calls),
+            callers=set(orm.callers)
         )
 
         for bb in orm.basic_blocks:
@@ -395,7 +417,7 @@ class Function(NativeCode):
         return f
 
     def __hash__(self):
-        return hash(frozenset(self.basic_blocks))
+        return int(self.sha256, 16)
 
     def __eq__(self, other:Function) -> bool:
         return hash(self) == hash(other)
@@ -438,7 +460,17 @@ class Function(NativeCode):
 
     @cached_property
     def xrefs(self) -> Set[Reference]:
-        raise NotImplementedError
+        xrefs = set()
+        for bb in self.basic_blocks:
+            xrefs |= bb.xrefs
+        return xrefs
+
+    @computed_field(repr=False)
+    @cached_property
+    def sha256(self) -> str:
+        bbs = sorted(self.basic_blocks, key=lambda b:b.address)
+        func_bytes = b"".join([bb.bytes for bb in bbs])
+        return hashlib.sha256(func_bytes).hexdigest()
 
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
@@ -455,33 +487,71 @@ class Function(NativeCode):
             bitness=self.bitness,
             pie=self.pie,
             canary=self.canary,
+            sha256=self.sha256,
             return_type=self.return_type,
             thunk=self.thunk,
             argv=", ".join(str(arg) for arg in self.argv)
         )
-
-        for bb in self.basic_blocks:
-            block_orm = bb.orm()
-            func.basic_blocks.append(block_orm)
-            block_orm.function = func
-        
-        for src in self.sources:    
-            src_orm = src.orm()
-            func.sources.append(src_orm)
-            src_orm.function = func
-        
+               
         return func
         
     def db_add(self, session:Session):
-        f = self.orm()
-        session.add(f)
-        for bb in f.basic_blocks:
-            session.add(bb)
-            for instr in bb.instructions:
-                session.add(instr)
-                if instr.ir is not None:
+        f_orm = None
+        with session.no_autoflush:
+            if NativeFunctionORM.exists_hash(session, self.sha256):
+                f_orm = NativeFunctionORM.select_hash(session, self.sha256)
+            else:
+                f_orm = self.orm()
+                session.add(f_orm)
+
+            if not self.thunk:
+                for src in self.sources:
+                    if not SourceFunctionORM.exists_hash(session, src.sha256):
+                        src_orm = src.orm()
+                        src_orm.compiled.append(f_orm)
+                        session.add(src_orm)
+                    else:
+                        src_orm = SourceFunctionORM.select_hash(session, src.sha256)
+                        src_orm.compiled.append(f_orm)
+            
+            for called in self.calls:
+                if called == self:
+                    c = f_orm
+                elif NativeFunctionORM.exists_hash(session, called.sha256):
+                    c = NativeFunctionORM.select_hash(session, called.sha256)
+                else:
+                    c = called.orm()
+                    session.add(c)
+                
+                f_orm.calls.append(c)
+
+            for caller in self.callers:
+                if caller == self:
+                    c = f_orm
+                elif NativeFunctionORM.exists_hash(session, caller.sha256):
+                    c = NativeFunctionORM.select_hash(session, caller.sha256)
+                else:
+                    c = caller.orm()
+                    session.add(c)
+                
+                f_orm.callers.append(c)
+
+
+        assert f_orm is not None
+
+        for bb in self.basic_blocks:
+            block_orm = bb.orm()
+            f_orm.basic_blocks.append(block_orm)
+            block_orm.function = f_orm
+
+            for instr in block_orm.instructions:
+                if instr is not None:
                     [session.add(ir) for ir in instr.ir]
-       
+                session.add(instr)
+            session.add(block_orm)
+        
+        session.commit()
+
 
 class FunctionSource(BaseModel):
     _backend: Backend = Backend()
@@ -490,6 +560,10 @@ class FunctionSource(BaseModel):
     name:str
     decompiled:bool
     source: str
+
+    @classmethod
+    def orm_type(cls) -> Type:
+        return SourceFunctionORM
 
     @classmethod
     def from_orm(cls, orm):
@@ -521,13 +595,6 @@ class FunctionSource(BaseModel):
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
 
-    def commit(self):
-        if self._backend.db is None:
-            raise NoDBException()
-
-        with Session(self._backend.db) as s:
-            s.add(self.orm())
-            s.commit()
     
 class Section(BaseModel):
     name: str
@@ -595,6 +662,10 @@ class Binary(NativeCode):
     tags: Set[str] = set([])
 
     @classmethod
+    def orm_type(cls) -> Type:
+        return BinaryORM
+
+    @classmethod
     def from_path(cls, path:Union[Path, str], **kwargs):
         obj = cls(**kwargs)
         obj._path = path
@@ -654,7 +725,7 @@ class Binary(NativeCode):
             return any([x in f for f in self.functions])
     
     
-    def orm(self):
+    def orm(self, session=None):
         name = NameORM(name=self.filename)
         strings = [StringsORM(value=s) for s in self.strings]
     
@@ -694,7 +765,7 @@ class Binary(NativeCode):
         return b
 
     def db_add(self, session:Session):
-        b = self.orm()
+        b = self.orm(session)
         session.add(b)
         for f in self.functions:
             f.db_add(session)
