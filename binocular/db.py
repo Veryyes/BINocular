@@ -108,7 +108,7 @@ class NativeFunctionORM(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
-    
+    address: Mapped[int]
     binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
     binary: Mapped[List[BinaryORM]] = relationship(back_populates='functions')
     

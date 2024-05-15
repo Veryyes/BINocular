@@ -395,6 +395,7 @@ class Function(NativeCode):
     def from_orm(cls, orm):
         f = cls(
             names=[n.name for n in orm.names],
+            address=orm.address,
             architecture=orm.architecture,
             endianness=orm.endianness,
             bitness=orm.bitness,
@@ -485,6 +486,7 @@ class Function(NativeCode):
             endianness=self.endianness,
             architecture=self.architecture,
             bitness=self.bitness,
+            address=self.address,
             pie=self.pie,
             canary=self.canary,
             sha256=self.sha256,
