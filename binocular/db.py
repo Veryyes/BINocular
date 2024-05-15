@@ -32,13 +32,6 @@ func_name_pivot = Table(
     Column("name_id", ForeignKey("names.id"))
 )
 
-native_func_pivot = Table(
-    "native_func_pivot",
-    Base.metadata,
-    Column("bin_id", ForeignKey("binaries.id")),
-    Column("native_func_id", ForeignKey("native_functions.id")),
-)
-
 source_compile_pivot = Table(
     "source_compiled_pivot",
     Base.metadata,
@@ -108,20 +101,16 @@ class BinaryORM(Base):
 
     tags:Mapped[str]
 
-    functions: Mapped[List[NativeFunctionORM]] = relationship(
-        secondary=native_func_pivot,
-        back_populates='binaries'
-    )
+    functions: Mapped[List[NativeFunctionORM]] = relationship(back_populates='binary')
 
 class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
-    binaries: Mapped[List[BinaryORM]] = relationship(
-        secondary=native_func_pivot,
-        back_populates='functions'
-    )
+    
+    binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
+    binary: Mapped[List[BinaryORM]] = relationship(back_populates='functions')
     
     basic_blocks: Mapped[List[BasicBlockORM]] = relationship(back_populates='function')
     sha256: Mapped[int] = mapped_column(Integer, unique=True, index=True)

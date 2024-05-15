@@ -495,13 +495,14 @@ class Function(NativeCode):
                
         return func
         
-    def db_add(self, session:Session):
+    def db_add(self, session:Session, binary:BinaryORM=None):
         f_orm = None
         with session.no_autoflush:
             if NativeFunctionORM.exists_hash(session, self.sha256):
                 f_orm = NativeFunctionORM.select_hash(session, self.sha256)
             else:
                 f_orm = self.orm()
+                f_orm.binary = binary
                 session.add(f_orm)
 
             if not self.thunk:
@@ -521,6 +522,7 @@ class Function(NativeCode):
                     c = NativeFunctionORM.select_hash(session, called.sha256)
                 else:
                     c = called.orm()
+                    c.binary = binary
                     session.add(c)
                 
                 f_orm.calls.append(c)
@@ -532,6 +534,7 @@ class Function(NativeCode):
                     c = NativeFunctionORM.select_hash(session, caller.sha256)
                 else:
                     c = caller.orm()
+                    c.binary = binary
                     session.add(c)
                 
                 f_orm.callers.append(c)
@@ -725,7 +728,7 @@ class Binary(NativeCode):
             return any([x in f for f in self.functions])
     
     
-    def orm(self, session=None):
+    def orm(self):
         name = NameORM(name=self.filename)
         strings = [StringsORM(value=s) for s in self.strings]
     
@@ -765,10 +768,11 @@ class Binary(NativeCode):
         return b
 
     def db_add(self, session:Session):
-        b = self.orm(session)
+        # TODO check if it exists first
+        b = self.orm()
         session.add(b)
         for f in self.functions:
-            f.db_add(session)
+            f.db_add(session, binary=b)
             
 
     def set_path(self, path:Union[Path, str]):
