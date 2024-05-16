@@ -5,7 +5,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any, Optional, Tuple, List, Dict
+from typing import Any, Optional, Tuple, List, Dict, Set
 
 import coloredlogs
 
@@ -107,6 +107,8 @@ class Disassembler(ABC):
                 argv=self.get_func_args(addr, func_ctxt),
                 thunk=self.is_func_thunk(addr, func_ctxt)
             )
+            f._binary = self.binary
+
             count += 1
 
             decompiled_code = self.get_func_decomp(addr, func_ctxt)
@@ -120,13 +122,16 @@ class Disassembler(ABC):
                 f.sources.add(dsrc)
 
             xrefs = set(self.get_func_xrefs(addr, func_ctxt))
-
-            self._create_basicblocks(addr, func_ctxt, f, xrefs)
-        
+            self._create_basicblocks(addr, func_ctxt, f, xrefs.copy())
             self.functions.add(f)
 
             self._func_addrs[addr] = f
             self._func_names[func_name] = f
+
+            if len(f.basic_blocks) > 0:
+                f.end = set((bb for bb, out_degree in f.cfg.out_degree() if out_degree == 0))
+            elif not f.thunk:
+                logger.warn(f"[{self.disassm_name()}] {func_name} @ {addr} has 0 Basic Blocks")
         
         # 2nd pass to do callee/callers
         for func_ctxt in self.get_func_iterator():

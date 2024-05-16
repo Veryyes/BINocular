@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union, Set, IO, Optional, Tuple, Iterable, Any, Type
+from typing import Dict, List, Union, Set, IO, Optional, Iterable, Any, Type
 from functools import cached_property
 from pathlib import Path
 import os
 import tempfile
 import hashlib
-import itertools
 
 import networkx as nx
 from pydantic import BaseModel, computed_field, model_validator
@@ -223,7 +222,7 @@ class Instruction(NativeCode):
             address = 0
 
         il = pyvex.lift(self.data, address, str2archinfo(self.architecture))
-        return IR(lang_name=IL.VEX, data=";".join([stmt.pp() for stmt in il.statements]))
+        return IR(lang_name=IL.VEX, data=";".join([stmt.pp_str() for stmt in il.statements]))
 
 class BasicBlock(NativeCode): 
     _backend: Backend = Backend()
@@ -334,11 +333,16 @@ class BasicBlock(NativeCode):
         bb_ir = []
         for instr in self.instructions:
             bb_ir.append(instr.vex().data)
-        return IR(lang_name=IL, data=";".join(bb_ir))
+        return IR(lang_name=IL.VEX, data="\n".join(bb_ir))
 
-    # TODO ask disassembler first, otherwise default to vex
     def ir(self):
-        return self.vex()
+        bb_ir = []
+        for instr in self.instructions:
+            if instr.ir is None:
+                bb_ir.append(instr.vex().data)
+            else:    
+                bb_ir.append(instr.ir.data)
+        return IR(lang_name=instr.ir.lang_name, data="\n".join(bb_ir))
 
     def orm(self):
         bb = BasicBlockORM(
@@ -364,12 +368,12 @@ class BasicBlock(NativeCode):
         for instr in bb.instructions:
             session.add(instr)
             if instr.ir is not None:
-                # session.add(instr.ir)
                 [session.add(ir) for ir in instr.ir]
 
 class Function(NativeCode):
     _backend: Backend = Backend()
     _block_cache: Dict[int, Optional[BasicBlock]] = dict()
+    _binary: Binary = None
 
     address: Optional[int] = None
     pie:Optional[PIEType] = None
@@ -381,7 +385,7 @@ class Function(NativeCode):
     thunk:bool = False
 
     basic_blocks: Set[BasicBlock] = set([])
-    start: BasicBlock = None
+    start: Optional[BasicBlock] = None
     end: Set[BasicBlock] = set([])
     
     calls: Set[Function] = set([])
@@ -472,6 +476,42 @@ class Function(NativeCode):
         bbs = sorted(self.basic_blocks, key=lambda b:b.address)
         func_bytes = b"".join([bb.bytes for bb in bbs])
         return hashlib.sha256(func_bytes).hexdigest()
+
+    @cached_property
+    def bytes(self) -> bytes:
+        '''Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block'''
+        bbs = [bb for bb in self.basic_blocks]
+        bbs = sorted(bbs, key=lambda b: b.address)
+
+        if self._binary is not None:
+            start = bbs[0].address - self._binary.base_addr
+            end = bbs[-1].address + len(bbs[-1]) - self._binary.base_addr
+            return self._binary.bytes()[start:end]
+            
+        return None
+
+    def disasm(self) -> str:
+        '''Returns disassembled instructions from the lowest addressed basic block to the end of the largest addressed basic block'''
+        bbs = [bb for bb in self.basic_blocks]
+        bbs = sorted(bbs, key=lambda b: b.address)
+
+        asm = []
+        for bb in bbs:
+            for instr in bb.instructions:
+                asm.append(instr.asm)
+        
+        return "\n".join(asm)
+
+    def ir(self) -> str:
+        '''Returns lifed intermediate representation of instructions from the lowest addressed basic block to the end of the largest addressed basic block'''
+        bbs = [bb for bb in self.basic_blocks]
+        bbs = sorted(bbs, key=lambda b: b.address)
+
+        ir = []
+        for bb in bbs:
+            ir.append(bb.ir().data)
+            
+        return "\n".join(ir)
 
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
