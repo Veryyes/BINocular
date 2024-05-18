@@ -10,7 +10,7 @@ from typing import Any, Optional, Tuple, List, Dict, Set
 import coloredlogs
 
 from .primitives import (BasicBlock, Binary, Function, FunctionSource,
-                         Instruction, Section, Argument, Branch, IR, Reference)
+                         Instruction, Section, Argument, Branch, IR, Reference, Variable)
 
 from .consts import Endian
 
@@ -105,7 +105,9 @@ class Disassembler(ABC):
                 names=[func_name],
                 return_type=self.get_func_return_type(addr, func_ctxt),
                 argv=self.get_func_args(addr, func_ctxt),
-                thunk=self.is_func_thunk(addr, func_ctxt)
+                thunk=self.is_func_thunk(addr, func_ctxt),
+                stack_frame_size=self.get_func_stack_frame_size(addr, func_ctxt),
+                variables=[v for v in self.get_func_vars(addr, func_ctxt)]
             )
             f._binary = self.binary
 
@@ -334,6 +336,16 @@ class Disassembler(ABC):
     @abstractmethod
     def get_func_return_type(self, addr:int, func_ctxt:Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
+        raise NotImplementedError
+    
+    @abstractmethod
+    def get_func_stack_frame_size(self, addr:int, func_ctxt:Any) -> int:
+        '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
         raise NotImplementedError
 
     @abstractmethod

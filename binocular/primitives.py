@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 import pyvex
 
 
-from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM
+from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 
@@ -55,6 +55,36 @@ class Branch:
 class IR:
     lang_name: IL
     data: str
+
+class Variable(BaseModel):
+    data_type: str
+    name: str
+    is_register: bool
+    is_stack: bool
+    stack_offset: Optional[int] = 0
+
+    @classmethod
+    def orm_type(cls) -> Type:
+        return VariableORM
+
+    @classmethod
+    def from_orm(cls, orm):
+        return cls(
+            data_type = orm.data_type,
+            name = orm.name,
+            is_register = orm.is_register,
+            is_stack = orm.is_stack,
+            stack_offset = orm.stack_offset
+        )
+
+    def orm(self):
+        return VariableORM(
+            data_type=self.data_type,
+            name=self.name,
+            is_register=self.is_register,
+            is_stack=self.is_stack,
+            stack_offset=self.stack_offset
+        )
 
 class Reference(BaseModel):
     from_: int 
@@ -381,6 +411,8 @@ class Function(NativeCode):
     names:Optional[List[str]] = None
     return_type:Optional[str] = None
     argv: List[Argument] = None
+    variables: List[Variable] = list()
+    stack_frame_size: int = 0
     sources: Set[FunctionSource] = set([])
     thunk:bool = False
 
@@ -406,12 +438,15 @@ class Function(NativeCode):
             pie=orm.pie,
             canary=orm.canary,
             sha256=orm.sha256,
+            stack_frame_size=orm.stack_frame_size,
             return_type=orm.return_type,
             thunk=orm.thunk,
             argv=[Argument.from_literal(arg) for arg in orm.argv.split(",")],
             calls=set(orm.calls),
             callers=set(orm.callers)
         )
+        for var in orm.variables:
+            f.variables.append(Variable.from_orm(var))
 
         for bb in orm.basic_blocks:
             f.basic_blocks.add(BasicBlock.from_orm(bb))
@@ -594,6 +629,11 @@ class Function(NativeCode):
                     [session.add(ir) for ir in instr.ir]
                 session.add(instr)
             session.add(block_orm)
+
+        for var in self.variables:
+            var_orm = var.orm()
+            f_orm.variables.append(var_orm)
+            session.add(var_orm)
         
         session.commit()
 

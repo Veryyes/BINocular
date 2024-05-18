@@ -10,7 +10,7 @@ import pkgutil
 import binascii
 
 from .disassembler import Disassembler
-from .primitives import Section, Instruction, IR, Branch, Argument, Reference, RefType
+from .primitives import Section, Instruction, IR, Branch, Argument, Reference, RefType, Variable
 from .consts import Endian, BranchType, IL
 from .utils import run_proc
 
@@ -233,6 +233,36 @@ class Rizin(Disassembler):
         signature = self._pipe.cmdj('afsj')
 
         return signature['ret']
+
+    def get_func_stack_frame_size(self, addr:int, func_ctxt:Any) -> int:
+        '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
+        self._pipe.cmd(f"s {addr}")
+
+        return self._pipe.cmdj('afij')[0]['stackframe']
+
+    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
+        self._pipe.cmd(f"s {addr}")
+        vars = list()
+        if 'stack' not in self._pipe.cmdj('afvlj'):
+            return vars
+
+        for var in self._pipe.cmdj('afvlj')['stack']:
+            if not var['arg']:
+                v = Variable(
+                    data_type=var['type'],
+                    name=var['name'],
+                    is_register=var['storage']['type'] != "stack",
+                    is_stack=var['storage']['type'] == "stack",
+                )
+
+                if v.is_stack:
+                    v.stack_offset = var['storage']['stack']
+
+                vars.append(v)
+
+        return vars
+
 
     def is_func_thunk(self, addr:int, func_ctxt:Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''

@@ -107,13 +107,15 @@ class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    sha256: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
     address: Mapped[int]
     binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
     binary: Mapped[List[BinaryORM]] = relationship(back_populates='functions')
     
     basic_blocks: Mapped[List[BasicBlockORM]] = relationship(back_populates='function')
-    sha256: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    variables: Mapped[List[VariableORM]] = relationship(back_populates='function')
+    stack_frame_size: Mapped[int] = mapped_column(Integer, default=0)
     endianness: Mapped[Endian]
     architecture: Mapped[str]
     bitness:Mapped[int]
@@ -153,6 +155,19 @@ class NativeFunctionORM(Base):
         if id_ is None:
             return False
         return id_
+
+class VariableORM(Base):
+    __tablename__ = "variables"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    data_type: Mapped[str]
+    name: Mapped[str]
+    is_register: Mapped[bool]
+    is_stack: Mapped[bool]
+    stack_offset: Mapped[Optional[int]]
+    function_id:Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
+    function:Mapped[NativeFunctionORM] = relationship(back_populates='variables')
+    
 
 class BasicBlockORM(Base):
     __tablename__ = "basic_blocks"

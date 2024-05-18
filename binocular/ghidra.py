@@ -13,7 +13,7 @@ from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
 from pyhidra.core import _setup_project, _analyze_program
 
 from .disassembler import Disassembler
-from .primitives import Section,Instruction, IR, Argument, Branch, Reference
+from .primitives import Section,Instruction, IR, Argument, Branch, Reference, Variable
 from .consts import Endian, IL, BranchType, RefType
 
 class Ghidra(Disassembler):
@@ -252,6 +252,25 @@ class Ghidra(Disassembler):
         proto = high_func.getFunctionPrototype()
 
         return str(proto.getReturnType())
+
+    def get_func_stack_frame_size(self, addr:int, func_ctxt:Any) -> int:
+        '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
+        sf = func_ctxt.getStackFrame()
+        return sf.getFrameSize()
+
+    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
+        vars = list()
+        for var in func_ctxt.getLocalVariables():
+            v = Variable(
+                data_type=var.getDataType().getName(),
+                name=var.getName(),
+                is_register=var.isRegisterVariable(),
+                is_stack=var.isStackVariable(),
+                stack_offset=var.getStackOffset()
+            )
+            vars.append(v)
+        return vars
 
     def is_func_thunk(self, addr:int, func_ctxt:Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
