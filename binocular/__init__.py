@@ -9,7 +9,8 @@ from .primitives import (
     Function,
     FunctionSource,
     Section,
-    Binary
+    Binary,
+    Variable
 )
 
 from .consts import (
@@ -40,5 +41,6 @@ __all__ = [
     "Endian",
     "BranchType",
     "IL",
+    "Variable",
     "IndirectToken",
 ]

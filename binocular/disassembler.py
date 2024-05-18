@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import logging
 import time
+import string
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any, Optional, Tuple, List, Dict, Set
+from typing import Any, Optional, Tuple, List, Dict, Set, IO
 
 import coloredlogs
 
@@ -77,11 +78,14 @@ class Disassembler(ABC):
             endianness=self.get_endianness(),
             bitness=self.get_bitness(),
             base_addr=self.get_base_address(),
-            strings=self.get_strings(),
             dynamic_libs=self.get_dynamic_libs()
         )
         self.binary.set_path(self._binary_filepath)
         self.binary.set_disassembler(self)
+
+        io_stream = self.binary.io()
+        self.binary.strings |= set(self.get_strings(io_stream, len(self.binary)))
+        io_stream.close()
 
         self.functions = set()
 
@@ -227,9 +231,9 @@ class Disassembler(ABC):
         '''Returns the instruction at the given address'''
         return self._instrs.get(address, None)
 
-    #######################################################
-    # REQUIRED & OPTIONAL DISASSEMBLER DEFINED OPERATIONS #
-    #######################################################
+    ############################################
+    # OPTIONAL DISASSEMBLER DEFINED OPERATIONS #
+    ############################################
 
     def open(self):
         '''Open up any resources'''
@@ -238,6 +242,65 @@ class Disassembler(ABC):
     def close(self):
         '''Release/Free up any resources'''
         pass
+
+    def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
+        '''Returns the list of defined strings in the binary'''
+        strings = list()
+        printables = bytes(string.printable, 'ascii')
+        
+        buff = b""
+        while True:
+            chunk = binary_io.read(4096)
+            if not chunk:
+                break
+            buff += chunk
+
+            i = 0
+            while len(buff) >= 5:
+                while(buff[i] in printables):
+                    i += 1
+
+                if buff[i] == 0 and i > 3:
+                    strings.append(buff[:i])
+                    buff = buff[i+1:]
+                else:
+                    buff = buff[1:]
+                i = 0
+                    
+        return strings
+
+    def get_sections(self) -> Iterable[Section]:
+        '''
+        Returns a list of the sections within the binary.
+        Currently only supports sections within an ELF file.
+        '''
+        return list()
+
+    def get_binary_name(self) -> str:
+        '''Returns the name of the binary loaded'''
+        return os.path.basename(self._binary_filepath)
+
+    def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
+        '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
+        return None
+
+    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
+        return list()
+
+    def get_ir_from_instruction(self, instr_addr:int, instr:Instruction) -> Optional[IR]:
+        '''
+        Returns a list of Intermediate Representation data based on the instruction given
+        '''
+        return instr.vex()
+
+    def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
+        '''Return comments at the instruction'''
+        raise None
+
+    ############################################
+    # REQUIRED DISASSEMBLER DEFINED OPERATIONS #
+    ############################################
 
     @abstractmethod
     def analyze(self, path) -> bool:
@@ -258,17 +321,6 @@ class Disassembler(ABC):
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         raise NotImplementedError
        
-    def get_sections(self) -> Iterable[Section]:
-        '''
-        Returns a list of the sections within the binary.
-        Currently only supports sections within an ELF file.
-        '''
-        return list()
-
-    def get_binary_name(self) -> str:
-        '''Returns the name of the binary loaded'''
-        return os.path.basename(self._binary_filepath)
-
     @abstractmethod
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
@@ -296,11 +348,6 @@ class Disassembler(ABC):
     @abstractmethod
     def get_base_address(self) -> int:
         '''Returns the base address the binary is based at'''
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_strings(self) -> Iterable[str]:
-        '''Returns the list of defined strings in the binary'''
         raise NotImplementedError
 
     @abstractmethod
@@ -344,18 +391,8 @@ class Disassembler(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
-        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
-        raise NotImplementedError
-
-    @abstractmethod
     def is_func_thunk(self, addr:int, func_ctxt:Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
-        '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
         raise NotImplementedError
 
     @abstractmethod
@@ -402,16 +439,4 @@ class Disassembler(ABC):
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_ir_from_instruction(self, instr_addr:int, instr:Instruction) -> Optional[IR]:
-        '''
-        Returns a list of Intermediate Representation data based on the instruction given
-        '''
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
-        '''Return comments at the instruction'''
         raise NotImplementedError

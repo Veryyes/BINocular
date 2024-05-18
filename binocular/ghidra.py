@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections.abc import Iterable
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, IO
 import pkgutil
 import os
 import tempfile
@@ -191,7 +191,7 @@ class Ghidra(Disassembler):
         '''Returns the base address the binary is based at'''
         return self.program.getImageBase().getOffset()
     
-    def get_strings(self) -> Iterable[str]:
+    def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
         from ghidra.program.util import DefinedDataIterator
 

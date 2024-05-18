@@ -727,6 +727,7 @@ class Binary(NativeCode):
     _compressed:bool=False
     # The file contents of the binary
     _bytes: bytes = None
+    _size: int = None
 
     _functions: Set[Function] = None   
 
@@ -737,8 +738,11 @@ class Binary(NativeCode):
     base_addr:int = 0
     sections: List[Section] = []
     dynamic_libs: Set[str] = set([])
+
+    # TODO
     compiler: Optional[str] = None
     compilation_flags: Optional[str] = None
+    
     
     # Strings from String table
     # maybe use `$ strings` if not such structure exists in the binary?
@@ -795,10 +799,14 @@ class Binary(NativeCode):
 
         for f in orm.functions:
             func = Function.from_orm(f)
-            # TODO func.address = 
             b.functions.add(func)
 
         return b
+
+    def __len__(self):
+        if self._size is None:
+            self._size = os.path.getsize(self._path)
+        return self._size
 
     def __hash__(self):
         return int(self.sha256, 16)

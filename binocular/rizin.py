@@ -2,7 +2,7 @@
 from __future__ import annotations
 from collections.abc import Iterable
 from collections import defaultdict
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, IO
 from pathlib import Path
 import os
 import shutil
@@ -146,7 +146,7 @@ class Rizin(Disassembler):
         '''Returns the base address the binary is based at'''
         return int(self._pipe.cmd("echo $B"), 16)
     
-    def get_strings(self) -> Iterable[str]:
+    def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
         return [s['string'] for s in self._pipe.cmdj('izj')]
 

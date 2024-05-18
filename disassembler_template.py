@@ -1,9 +1,9 @@
 
 from __future__ import annotations
 from collections.abc import Iterable
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, IO
 
-from binocular import IR, Argument, Branch, Disassembler, Instruction, Section, Endian
+from binocular import IR, Argument, Branch, Disassembler, Instruction, Section, Endian, Variable
 
 class TemplateDisassm(Disassembler):
 
@@ -22,6 +22,19 @@ class TemplateDisassm(Disassembler):
         '''Release/Free up any resources'''
         pass
 
+    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
+        return super().get_strings(binary_io, file_size)
+
+    def get_ir_from_instruction(self, instr_addr:int, instr:Instruction) -> Optional[IR]:
+        '''
+        Returns a list of Intermediate Representation data based on the instruction given
+        '''
+        return super().get_ir_from_instruction(instr_addr, instr)
+
+    def get_binary_name(self) -> str:
+        '''Returns the name of the binary loaded'''
+        return super().get_binary_name()
+
     def get_sections(self) -> Iterable[Section]:
         '''
         Returns a list of the sections within the binary.
@@ -29,9 +42,17 @@ class TemplateDisassm(Disassembler):
         '''
         return list()
 
-    def get_binary_name(self) -> str:
-        '''Returns the name of the binary loaded'''
-        return super().get_binary_name()
+    def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
+        '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
+        return None
+
+    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
+        return list()
+
+    def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
+        '''Return comments at the instruction'''
+        raise None
 
     ####################
     # Please Implement #
@@ -77,10 +98,6 @@ class TemplateDisassm(Disassembler):
         '''Returns the base address the binary is based at'''
         raise NotImplementedError
     
-    def get_strings(self) -> Iterable[str]:
-        '''Returns the list of defined strings in the binary'''
-        raise NotImplementedError
-
     def get_dynamic_libs(self) -> Iterable[str]:
         '''Returns the list of names of the dynamic libraries used in this binary'''
         raise NotImplementedError
@@ -110,14 +127,14 @@ class TemplateDisassm(Disassembler):
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
         raise NotImplementedError
 
+    def get_func_stack_frame_size(self, addr:int, func_ctxt:Any) -> int:
+        '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
+        raise NotImplementedError
+
     def is_func_thunk(self, addr:int, func_ctxt:Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
         raise NotImplementedError
-    
-    def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
-        '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
-        raise NotImplementedError
-    
+       
     def get_func_bb_iterator(self, addr:int, func_ctxt:Any) -> Iterable[Any]:
         '''
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
@@ -143,14 +160,4 @@ class TemplateDisassm(Disassembler):
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        raise NotImplementedError
-    
-    def get_ir_from_instruction(self, instr_addr:int, instr:Instruction) -> Optional[IR]:
-        '''
-        Returns the Intermediate Representation data based on the instruction given
-        '''
-        raise NotImplementedError
-
-    def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
-        '''Return comments at the instruction'''
         raise NotImplementedError
