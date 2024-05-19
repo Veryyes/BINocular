@@ -9,11 +9,11 @@ setup(
     install_requires = [
         'rich',
         'pydantic',
+        'checksec.py',
         'networkx',
-        'archinfo'
         'checksec-py',
         'SQLAlchemy',
-        'coloredlogs'
+        'coloredlogs',
         'archinfo',
         'pyvex',
         'GitPython',
