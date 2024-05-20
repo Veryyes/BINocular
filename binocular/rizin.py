@@ -23,6 +23,51 @@ class Rizin(Disassembler):
     GIT_REPO = "https://github.com/rizinorg/rizin.git"
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'rizin')
 
+    @classmethod
+    def is_installed(cls, install_dir=None) -> bool:
+        '''Returns Boolean on whether or not the dissassembler is installed'''
+        if install_dir is not None:
+            bin_loc = os.path.join(install_dir, "build", "binrz", "rizin")
+            return os.path.exists(bin_loc)
+
+        sys_install = shutil.which('rizin') is not None
+        local_install = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "build", "binrz", "rizin"))
+        
+        return sys_install or local_install
+
+    @classmethod
+    def install(cls, install_dir=None) -> str:
+        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
+        print("Installing Rizin")
+
+        if install_dir is None:
+            install_dir = Rizin.DEFAULT_INSTALL
+
+        os.makedirs(install_dir, exist_ok=True)
+        print(f"Cloning Rizin to: {install_dir}")
+        try:
+            repo = Repo.clone_from(Rizin.GIT_REPO, install_dir)
+        except git.GitCommandError:
+            print("Rizin Already Cloned")
+            repo = Repo(install_dir)
+
+        # Lock in to Version 0.7.2 for now
+        repo.git.checkout("87add99")
+
+        cmds = [
+            ["meson", "setup", "build"],
+            ["meson", "compile", "-C", "build"],
+        ]
+
+        for cmd in cmds:
+            print(f"$ {' '.join(cmd)}")
+            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
+            print(out)
+            print(err)
+
+        return install_dir
+
+
     def __init__(self, verbose=True, rizin_home:str=None) -> None:
         super().__init__(verbose=verbose)
         self.rizin_home = rizin_home
@@ -78,48 +123,6 @@ class Rizin(Disassembler):
         self._bin_info = self._pipe.cmdj('ij')['bin']
         
         return True
-
-    def is_installed(self) -> bool:
-        '''Returns Boolean on whether or not the dissassembler is installed'''
-        if self.rizin_home is not None:
-            bin_loc = os.path.join(self.rizin_home, "build", "binrz", "rizin")
-            return os.path.exists(bin_loc)
-
-        sys_install = shutil.which('rizin') is not None
-        local_install = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "build", "binrz", "rizin"))
-        
-        return sys_install or local_install
-
-    def install(self, install_dir=None):
-        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
-        print("Installing Rizin")
-
-        if install_dir is None:
-            install_dir = Rizin.DEFAULT_INSTALL
-
-        os.makedirs(install_dir, exist_ok=True)
-        print(f"Cloning Rizin to: {install_dir}")
-        try:
-            repo = Repo.clone_from(Rizin.GIT_REPO, install_dir)
-        except git.GitCommandError:
-            print("Rizin Already Cloned")
-            repo = Repo(install_dir)
-
-        # Lock in to Version 0.7.2 for now
-        repo.git.checkout("87add99")
-
-        cmds = [
-            ["meson", "setup", "build"],
-            ["meson", "compile", "-C", "build"],
-        ]
-
-        for cmd in cmds:
-            print(f"$ {' '.join(cmd)}")
-            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
-            print(out)
-            print(err)
-
-        assert self.is_installed()
 
     def _post_normalize(self):
         del self._caller_cache

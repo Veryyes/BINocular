@@ -310,6 +310,21 @@ class Disassembler(ABC):
     # REQUIRED DISASSEMBLER DEFINED OPERATIONS #
     ############################################
 
+    @classmethod
+    @abstractmethod
+    def is_installed(self) -> bool:
+        '''Returns Boolean on whether or not the dissassembler is installed'''
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
+    def install(self, install_dir=None) -> str:
+        '''
+        Installs the disassembler to a user specified directory or within the python module if none is specified
+        :returns: the directory the disassembler is installed to
+        '''
+        raise NotImplementedError
+
     @abstractmethod
     def analyze(self, path) -> bool:
         '''
@@ -317,16 +332,6 @@ class Disassembler(ABC):
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: True on success, false otherwise
         '''
-        raise NotImplementedError
-
-    @abstractmethod
-    def is_installed(self) -> bool:
-        '''Returns Boolean on whether or not the dissassembler is installed'''
-        raise NotImplementedError
-
-    @abstractmethod
-    def install(self, install_dir=None):
-        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         raise NotImplementedError
        
     @abstractmethod

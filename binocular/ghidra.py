@@ -22,6 +22,41 @@ class Ghidra(Disassembler):
     RELEASE_URL = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0.2_build/ghidra_11.0.2_PUBLIC_20240326.zip"
     DEFAULT_PROJECT_PATH = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
 
+    @classmethod
+    def install(cls, install_dir=None) -> str:
+        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
+        if install_dir is None:
+            install_dir = Ghidra.DEFAULT_INSTALL
+
+        print("Downloading Ghidra")
+        with tempfile.TemporaryFile() as fp:
+            fp.write(urlopen(Ghidra.RELEASE_URL).read())
+            fp.seek(0)
+            print("Extracting Ghidra")
+            with zipfile.ZipFile(fp, 'r') as zf:
+                zf.extractall(install_dir)
+
+        ghidra_home = os.path.join(install_dir, os.listdir(install_dir)[0])
+        assert os.path.exists(ghidra_home)
+        
+        launcher = pyhidra.HeadlessPyhidraLauncher(install_dir=ghidra_home)
+        launcher.start()
+
+        return ghidra_home
+
+    @classmethod
+    def is_installed(cls, install_dir=None) -> bool:
+        '''Returns Boolean on whether or not the dissassembler is installed'''
+        os.makedirs(Ghidra.DEFAULT_INSTALL, exist_ok=True)
+        
+        if install_dir is None:
+            if len(os.listdir(Ghidra.DEFAULT_INSTALL)) == 0:
+                return False
+
+            install_dir = os.path.join(Ghidra.DEFAULT_INSTALL, os.listdir(Ghidra.DEFAULT_INSTALL)[0])
+        
+        return os.path.exists(os.path.join(install_dir, "support", "launch.sh"))
+
     def __init__(self, verbose=True, project_path:str=None, ghidra_home=None, save_on_close=False):
         super().__init__(verbose=verbose)
 
@@ -44,7 +79,7 @@ class Ghidra(Disassembler):
 
     def open(self):
         if not PyhidraLauncher.has_launched():
-            HeadlessPyhidraLauncher(install_dir=self.ghidra_home,verbose=False).start()
+            HeadlessPyhidraLauncher(install_dir=self.ghidra_home, verbose=False).start()
         return self
 
     def close(self):
@@ -62,7 +97,6 @@ class Ghidra(Disassembler):
         self.project = None
         self.program = None
         self.flat_api = None
-
 
     def get_sections(self) -> Iterable[Section]:
         '''
@@ -132,31 +166,6 @@ class Ghidra(Disassembler):
         self.decomp.openProgram(self.program)
 
         return True
-
-    def is_installed(self) -> bool:
-        '''Returns Boolean on whether or not the dissassembler is installed'''
-        if self.ghidra_home is None:
-            self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL, os.listdir(Ghidra.DEFAULT_INSTALL)[0])
-        
-        return os.path.exists(os.path.join(self.ghidra_home, "support", "launch.sh"))
-
-    def install(self, install_dir=None):
-        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
-        if install_dir is None:
-            install_dir = Ghidra.DEFAULT_INSTALL
-
-        print("Downloading Ghidra")
-        with tempfile.TemporaryFile() as fp:
-            fp.write(urlopen(Ghidra.RELEASE_URL).read())
-            fp.seek(0)
-            print("Extracting Ghidra")
-            with zipfile.ZipFile(fp, 'r') as zf:
-                zf.extractall(install_dir)
-
-        self.ghidra_home = os.path.join(install_dir, os.listdir(install_dir)[0])
-        assert os.path.exists(self.ghidra_home)
-        
-        pyhidra.DeferredPyhidraLauncher(install_dir=self.ghidra_home).start()
 
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''
@@ -242,6 +251,9 @@ class Ghidra(Disassembler):
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
         decomp_res = self._decompile(func_ctxt)
         high_func = decomp_res.getHighFunction()
+        if high_func is None:
+            return list()
+
         proto = high_func.getFunctionPrototype()
 
         # TODO handle var args
@@ -258,6 +270,8 @@ class Ghidra(Disassembler):
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
         decomp_res = self._decompile(func_ctxt)
         high_func = decomp_res.getHighFunction()
+        if high_func is None:
+            return ""
         proto = high_func.getFunctionPrototype()
 
         return str(proto.getReturnType())
@@ -288,7 +302,11 @@ class Ghidra(Disassembler):
     def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
         decomp_res = self._decompile(func_ctxt)
-        return decomp_res.getDecompiledFunction().getC()
+        dfunc = decomp_res.getDecompiledFunction()
+        if dfunc is None:
+            return None
+            
+        return dfunc.getC()
     
     def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
         refs = self.ref_m.getReferencesTo(self._mk_addr(addr))
