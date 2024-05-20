@@ -7,14 +7,19 @@ import tempfile
 import zipfile
 from urllib.request import urlopen
 from functools import lru_cache
+import logging
 
 import pyhidra
 from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
 from pyhidra.core import _setup_project, _analyze_program
+import coloredlogs
 
 from .disassembler import Disassembler
 from .primitives import Section,Instruction, IR, Argument, Branch, Reference, Variable
 from .consts import Endian, IL, BranchType, RefType
+
+logger = logging.getLogger(__name__)
+coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class Ghidra(Disassembler):
     
@@ -38,7 +43,14 @@ class Ghidra(Disassembler):
 
         ghidra_home = os.path.join(install_dir, os.listdir(install_dir)[0])
         assert os.path.exists(ghidra_home)
-        
+
+        # Permission to execute stuff in Ghidra Home
+        os.chmod(os.path.join(ghidra_home, "support", "launch.sh"), 0o775)
+        for root, dirs, files in os.walk(ghidra_home):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                os.chmod(fpath, 0o775)
+            
         launcher = pyhidra.HeadlessPyhidraLauncher(install_dir=ghidra_home)
         launcher.start()
 
@@ -84,6 +96,7 @@ class Ghidra(Disassembler):
 
     def close(self):
         from ghidra.app.script import GhidraScriptUtil
+        self.decomp.closeProgram()
         GhidraScriptUtil.releaseBundleHostReference()
         if self.project is not None:
             if self.save_on_close:        
@@ -126,7 +139,6 @@ class Ghidra(Disassembler):
 
     def _mk_addr(self, offset:int):
         return self.program.getAddressFactory().getDefaultAddressSpace().getAddress(offset)
-
 
     def analyze(self, path) -> bool:
         '''
@@ -245,7 +257,19 @@ class Ghidra(Disassembler):
     @lru_cache
     def _decompile(self, func_ctxt:Any):
         '''Return DecompileResult object. lru_cache'd because it's a little expensive'''
-        return self.decomp.decompileFunction(func_ctxt, self.decomp_timeout, self.monitor)
+        
+        
+        res = self.decomp.decompileFunction(func_ctxt, self.decomp_timeout, self.monitor)
+        if not res.decompileCompleted():
+            logger.warn(f"[{self.disassm_name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
+            # print(self.program)
+            # print(self.decomp.getProgram())
+            # print(self.decomp.getLastMessage())
+            # print(res.failedToStart())
+            # print(res.isCancelled())
+            # print(res.isTimedOut())
+            
+        return res
     
     def get_func_args(self, addr:int, func_ctxt:Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
