@@ -250,6 +250,8 @@ class Disassembler(ABC):
         self._func_addrs.clear()
         self._bbs.clear()
         self._instrs.clear()
+        self.binary = None
+        self.functions.clear()
 
     def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''

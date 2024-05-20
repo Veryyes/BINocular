@@ -8,6 +8,7 @@ setup(
     packages = ["binocular"],
     install_requires = [
         'rich',
+        'typer',
         'pydantic',
         'checksec.py',
         'networkx',
@@ -21,7 +22,10 @@ setup(
         'rzpipe',
         'pyhidra',
     ],
-    # entry_points={
-    #     "console_scripts": ['']
-    # }
+    extra_require = {
+        'dev': ['pytest', 'IPython']
+    },
+    entry_points={
+        "console_scripts": ['binocular = binocular.run:main']
+    }
 )

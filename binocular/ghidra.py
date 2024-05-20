@@ -256,18 +256,10 @@ class Ghidra(Disassembler):
 
     @lru_cache
     def _decompile(self, func_ctxt:Any):
-        '''Return DecompileResult object. lru_cache'd because it's a little expensive'''
-        
-        
+        '''Return DecompileResult object. lru_cache'd because it's a little expensive'''        
         res = self.decomp.decompileFunction(func_ctxt, self.decomp_timeout, self.monitor)
         if not res.decompileCompleted():
             logger.warn(f"[{self.disassm_name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
-            # print(self.program)
-            # print(self.decomp.getProgram())
-            # print(self.decomp.getLastMessage())
-            # print(res.failedToStart())
-            # print(res.isCancelled())
-            # print(res.isTimedOut())
             
         return res
     
