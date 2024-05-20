@@ -733,7 +733,7 @@ class Binary(NativeCode):
 
     filename: Optional[Union[str, List[str]]] = None
     names: List[str] = []
-    entrypoint: int = None
+    entrypoint: Optional[int] = None
     os: Optional[str] = None
     base_addr:int = 0
     sections: List[Section] = []
