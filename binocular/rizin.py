@@ -37,6 +37,16 @@ class Rizin(Disassembler):
         '''Release/Free up any resources'''
         self._pipe.quit()
 
+    def clear(self):
+        super().clear()
+        self._pipe.quit()
+        self._pipe = None
+
+        self._bin_info = None
+        self._thunk_dict = dict()
+        self._caller_cache = defaultdict(lambda: set())
+        self._calls_cache = defaultdict(lambda: set())
+
     def get_sections(self) -> Iterable[Section]:
         '''
         Returns a list of the sections within the binary.

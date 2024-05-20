@@ -55,6 +55,15 @@ class Ghidra(Disassembler):
                 self.project.save(self.program)
             self.project.close()
 
+    def clear(self):
+        super().clear()
+        self.project.close()
+        
+        self.project = None
+        self.program = None
+        self.flat_api = None
+
+
     def get_sections(self) -> Iterable[Section]:
         '''
         Returns a list of the sections within the binary.

@@ -243,6 +243,14 @@ class Disassembler(ABC):
         '''Release/Free up any resources'''
         pass
 
+    def clear(self):
+        '''Reset any state within this object'''
+        self._bb_count = 0
+        self._func_names.clear()
+        self._func_addrs.clear()
+        self._bbs.clear()
+        self._instrs.clear()
+
     def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
         strings = list()
