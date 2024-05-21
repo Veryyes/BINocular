@@ -40,18 +40,20 @@ def parse(
     with disasm_type() as disasm:
         disasm.load(p)
         b = disasm.binary
-        print("Binary:")
-        print(f"\tName: {b.names[0]}")
-        print(f"\tArch: {b.architecture}")
-        print(f"\tBits: {b.bitness}")
-        print(f"\tEndian: {b.endianness}")
-        print(f"\tSHA256: {b.sha256}")
-        print(f"\tSize: {len(b.bytes())}")
-        print(f"\tNum Functions: {len(b.functions)}")
+        if not quiet:
+            print("Binary:")
+            print(f"\tName: {b.names[0]}")
+            print(f"\tArch: {b.architecture}")
+            print(f"\tBits: {b.bitness}")
+            print(f"\tEndian: {b.endianness}")
+            print(f"\tSHA256: {b.sha256}")
+            print(f"\tSize: {len(b.bytes())}")
+            print(f"\tNum Functions: {len(b.functions)}")
 
         if uri is not None:
             with Session(Backend.engine) as s:
-                print("Inserting to DB")
+                if not quiet:
+                    print("Inserting to DB")
                 b.db_add(s)
                 s.commit()
 

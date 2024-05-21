@@ -572,11 +572,11 @@ class Function(NativeCode):
                
         return func
         
-    def db_add(self, session:Session, binary:BinaryORM=None):
+    def db_add(self, session:Session, binary:BinaryORM):
         f_orm = None
         with session.no_autoflush:
-            if NativeFunctionORM.exists_hash(session, self.sha256):
-                f_orm = NativeFunctionORM.select_hash(session, self.sha256)
+            if NativeFunctionORM.exists_in_binary(session, binary.sha256, self.sha256):
+                f_orm = NativeFunctionORM.select_hash_by_binary(session, binary.sha256, self.sha256)
             else:
                 f_orm = self.orm()
                 f_orm.binary = binary
@@ -595,8 +595,8 @@ class Function(NativeCode):
             for called in self.calls:
                 if called == self:
                     c = f_orm
-                elif NativeFunctionORM.exists_hash(session, called.sha256):
-                    c = NativeFunctionORM.select_hash(session, called.sha256)
+                elif NativeFunctionORM.exists_in_binary(session, binary.sha256, called.sha256):
+                    c = NativeFunctionORM.select_hash_by_binary(session, binary.sha256, called.sha256)
                 else:
                     c = called.orm()
                     c.binary = binary
@@ -607,8 +607,8 @@ class Function(NativeCode):
             for caller in self.callers:
                 if caller == self:
                     c = f_orm
-                elif NativeFunctionORM.exists_hash(session, caller.sha256):
-                    c = NativeFunctionORM.select_hash(session, caller.sha256)
+                elif NativeFunctionORM.exists_in_binary(session, binary.sha256, caller.sha256):
+                    c = NativeFunctionORM.select_hash_by_binary(session, binary.sha256, caller.sha256)
                 else:
                     c = caller.orm()
                     c.binary = binary
@@ -963,7 +963,6 @@ class Binary(NativeCode):
                 stmt = select(BinaryORM).where(BinaryORM.sha256 == self.sha256)
                 bin_orm = s.execute(stmt).first()
                 if bin_orm is not None:
-                    # TODO need to recover address :(
                     self._functions = [Function.from_orm(f) for f in bin_orm[0].functions]
                     return self._functions
         

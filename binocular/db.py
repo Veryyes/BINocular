@@ -4,7 +4,7 @@ from typing import Optional, List, Type
 
 from .consts import Endian, IL, RefType
 
-from sqlalchemy import Table, Column, ForeignKey, String, select, Integer
+from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, func
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship, Session
 from checksec.elf import PIEType, RelroType
 
@@ -107,11 +107,11 @@ class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    sha256: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    sha256: Mapped[int] = mapped_column(Integer, index=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
     address: Mapped[int]
     binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
-    binary: Mapped[List[BinaryORM]] = relationship(back_populates='functions')
+    binary: Mapped[BinaryORM] = relationship(back_populates='functions')
     
     basic_blocks: Mapped[List[BasicBlockORM]] = relationship(back_populates='function')
     variables: Mapped[List[VariableORM]] = relationship(back_populates='function')
@@ -143,15 +143,34 @@ class NativeFunctionORM(Base):
     )   
 
     @classmethod
-    def select_hash(cls, session, hash:str):
-        row = session.execute(select(NativeFunctionORM).where(NativeFunctionORM.sha256 == hash)).one_or_none()
+    def select_hash_by_binary(cls, session, bin_hash:str, func_hash:str):
+        stmt = select(NativeFunctionORM)\
+            .join(NativeFunctionORM.binary)\
+            .where((NativeFunctionORM.sha256 == func_hash) & (BinaryORM.sha256 == bin_hash))
+
+        row = session.execute(stmt).one_or_none()
         if row is not None:
             return row[0]
         return row
 
     @classmethod
+    def exists_in_binary(cls, session, bin_hash:str, func_hash:str):
+        stmt = select(NativeFunctionORM.id) \
+            .join(NativeFunctionORM.binary) \
+            .where((NativeFunctionORM.sha256 == func_hash) & (BinaryORM.sha256 == bin_hash))
+        id_ = session.execute(stmt).one_or_none()
+        if id_ is None:
+            return False
+        return id_
+
+    @classmethod
+    def select_hash(cls, session, hash:str):
+        row = session.execute(select(NativeFunctionORM).where(NativeFunctionORM.sha256 == hash)).one_or_none()
+        return row
+
+    @classmethod
     def exists_hash(cls, session, hash:str):
-        id_ =  session.query(NativeFunctionORM.id).filter_by(sha256=hash).scalar()
+        id_ = session.query(NativeFunctionORM.id).filter_by(sha256=hash).scalar()
         if id_ is None:
             return False
         return id_
@@ -168,7 +187,6 @@ class VariableORM(Base):
     function_id:Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
     function:Mapped[NativeFunctionORM] = relationship(back_populates='variables')
     
-
 class BasicBlockORM(Base):
     __tablename__ = "basic_blocks"
     

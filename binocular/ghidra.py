@@ -46,7 +46,7 @@ class Ghidra(Disassembler):
 
         # Permission to execute stuff in Ghidra Home
         os.chmod(os.path.join(ghidra_home, "support", "launch.sh"), 0o775)
-        for root, dirs, files in os.walk(ghidra_home):
+        for root, _, files in os.walk(ghidra_home):
             for fname in files:
                 fpath = os.path.join(root, fname)
                 os.chmod(fpath, 0o775)
@@ -96,7 +96,8 @@ class Ghidra(Disassembler):
 
     def close(self):
         from ghidra.app.script import GhidraScriptUtil
-        self.decomp.closeProgram()
+        if self.decomp.getProgram() is not None:
+            self.decomp.closeProgram()
         GhidraScriptUtil.releaseBundleHostReference()
         if self.project is not None:
             if self.save_on_close:        
@@ -105,8 +106,8 @@ class Ghidra(Disassembler):
 
     def clear(self):
         super().clear()
+        self.decomp.closeProgram()
         self.project.close()
-        
         self.project = None
         self.program = None
         self.flat_api = None

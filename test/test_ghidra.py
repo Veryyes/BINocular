@@ -3,9 +3,8 @@ import itertools
 from binocular import Ghidra, Binary
 
 def test_disassm(make):
-    with Ghidra() as g:
-        assert g.is_installed()
-        
+    assert Ghidra.is_installed()
+    with Ghidra() as g:       
         g.load("example")
         b = g.binary
 
@@ -27,9 +26,8 @@ def test_disassm(make):
             assert f0 == f1
 
 def test_binary(make):
+    assert Ghidra.is_installed()
     with Ghidra() as g:
-        assert g.is_installed()
-        
         g.load("example")
         b = g.binary
 
@@ -90,9 +88,8 @@ def test_binary(make):
         assert b1.fortify_score == b.fortify_score
 
 def test_function(make):
-    with Ghidra() as g:
-        assert g.is_installed()
-        
+    assert Ghidra.is_installed()
+    with Ghidra() as g:       
         g.load("example")
         f = g.function_sym('foo')
 
