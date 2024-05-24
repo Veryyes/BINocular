@@ -97,9 +97,11 @@ class Ghidra(Disassembler):
 
     def close(self):
         from ghidra.app.script import GhidraScriptUtil
+        GhidraScriptUtil.releaseBundleHostReference()
+
         if self.decomp is not None:
             self.decomp.closeProgram()
-        GhidraScriptUtil.releaseBundleHostReference()
+        
         if self.project is not None:
             if self.save_on_close:        
                 self.project.save(self.program)
@@ -107,8 +109,11 @@ class Ghidra(Disassembler):
 
     def clear(self):
         super().clear()
+        GhidraScriptUtil.releaseBundleHostReference()
         if self.decomp is not None:
             self.decomp.closeProgram()
+        if self.save_on_close:        
+            self.project.save(self.program)
         self.project.close()
         self.project = None
         self.program = None
