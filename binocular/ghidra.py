@@ -8,6 +8,7 @@ import zipfile
 from urllib.request import urlopen
 from functools import lru_cache
 import logging
+import hashlib
 
 import pyhidra
 from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
@@ -75,11 +76,11 @@ class Ghidra(Disassembler):
         self.project = None
         self.program = None
         self.flat_api = None
+        self.decomp = None
 
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH
-        self.project_location = os.path.dirname(project_path)
-        self.project_name = os.path.basename(project_path)
+        self.base_project_path = project_path
 
         if ghidra_home is None:
             self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL, os.listdir(Ghidra.DEFAULT_INSTALL)[0])
@@ -96,7 +97,7 @@ class Ghidra(Disassembler):
 
     def close(self):
         from ghidra.app.script import GhidraScriptUtil
-        if self.decomp.getProgram() is not None:
+        if self.decomp is not None:
             self.decomp.closeProgram()
         GhidraScriptUtil.releaseBundleHostReference()
         if self.project is not None:
@@ -106,7 +107,8 @@ class Ghidra(Disassembler):
 
     def clear(self):
         super().clear()
-        self.decomp.closeProgram()
+        if self.decomp is not None:
+            self.decomp.closeProgram()
         self.project.close()
         self.project = None
         self.program = None
@@ -152,6 +154,12 @@ class Ghidra(Disassembler):
         from ghidra.app.decompiler import DecompInterface, DecompileOptions
         from ghidra.util.task import ConsoleTaskMonitor
         from ghidra.program.model.block import BasicBlockModel
+        
+        with open(path, 'rb') as f:
+            project_path = os.path.join(self.base_project_path, hashlib.md5(f.read()).hexdigest())
+
+        self.project_location = os.path.dirname(project_path)
+        self.project_name = os.path.basename(project_path)
 
         self.project, self.program = _setup_project(
             path,
@@ -307,8 +315,9 @@ class Ghidra(Disassembler):
                 name=var.getName(),
                 is_register=var.isRegisterVariable(),
                 is_stack=var.isStackVariable(),
-                stack_offset=var.getStackOffset()
             )
+            if v.is_stack:
+                v.stack_offset = var.getStackOffset()
             vars.append(v)
         return vars
 
