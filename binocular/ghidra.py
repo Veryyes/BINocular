@@ -9,6 +9,7 @@ from urllib.request import urlopen
 from functools import lru_cache
 import logging
 import hashlib
+import jpype
 
 import pyhidra
 from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
@@ -107,18 +108,23 @@ class Ghidra(Disassembler):
                 self.project.save(self.program)
             self.project.close()
 
+        if jpype.isJVMStarted():
+            jpype.shutdownJVM()
+
     def clear(self):
+        from ghidra.app.script import GhidraScriptUtil
         super().clear()
         GhidraScriptUtil.releaseBundleHostReference()
         if self.decomp is not None:
             self.decomp.closeProgram()
         if self.save_on_close:        
             self.project.save(self.program)
+
         self.project.close()
         self.project = None
         self.program = None
         self.flat_api = None
-
+        
     def get_sections(self) -> Iterable[Section]:
         '''
         Returns a list of the sections within the binary.
