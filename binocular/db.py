@@ -103,6 +103,11 @@ class BinaryORM(Base):
 
     functions: Mapped[List[NativeFunctionORM]] = relationship(back_populates='binary')
 
+    @classmethod
+    def select_hash(cls, session, hash:str):
+        row = session.execute(select(BinaryORM).where(BinaryORM.sha256 == hash)).one_or_none()
+        return row
+
 class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
