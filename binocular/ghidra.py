@@ -71,13 +71,16 @@ class Ghidra(Disassembler):
         
         return os.path.exists(os.path.join(install_dir, "support", "launch.sh"))
 
-    def __init__(self, verbose=True, project_path:str=None, ghidra_home=None, save_on_close=False):
+    def __init__(self, verbose=True, project_path:str=None, ghidra_home=None, save_on_close=False, jvm_args:Iterable[str]=None):
         super().__init__(verbose=verbose)
 
         self.project = None
         self.program = None
         self.flat_api = None
         self.decomp = None
+        self.jvm_args = jvm_args
+        if self.jvm_args is None:
+            self.jvm_args = list()
 
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH
@@ -93,7 +96,9 @@ class Ghidra(Disassembler):
 
     def open(self):
         if not PyhidraLauncher.has_launched():
-            HeadlessPyhidraLauncher(install_dir=self.ghidra_home, verbose=False).start()
+            launcher = HeadlessPyhidraLauncher(install_dir=self.ghidra_home, verbose=False)
+            launcher.add_vmargs(*self.jvm_args)
+            launcher.start()
         return self
 
     def close(self):
