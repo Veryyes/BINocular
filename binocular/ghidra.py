@@ -177,30 +177,35 @@ class Ghidra(Disassembler):
         self.project_location = os.path.dirname(project_path)
         self.project_name = os.path.basename(project_path)
 
-        self.project, self.program = _setup_project(
-            path,
-            self.project_location,
-            self.project_name,
-            None,
-            None
-        )
-        GhidraScriptUtil.acquireBundleHostReference()
+        import java
+        try:
+            self.project, self.program = _setup_project(
+                path,
+                self.project_location,
+                self.project_name,
+                None,
+                None
+            )
+            GhidraScriptUtil.acquireBundleHostReference()
 
-        self.flat_api = FlatProgramAPI(self.program)
-        _analyze_program(self.flat_api, self.program)
+            self.flat_api = FlatProgramAPI(self.program)
+            _analyze_program(self.flat_api, self.program)
 
-        # Create refs to all the managers that ghidra has lol
-        self.base_addr = self.program.getImageBase()
-        self.fm = self.program.getFunctionManager()
-        self.st = self.program.getSymbolTable()
-        self.ref_m = self.program.getReferenceManager()
-        self.lang_description = self.program.getLanguage().getLanguageDescription()
-        self.bb_model = BasicBlockModel(self.program)
-        self.listing = self.program.getListing()
-        self.monitor = ConsoleTaskMonitor()
-        self.decomp = DecompInterface()
-        self.decomp.setOptions(DecompileOptions())
-        self.decomp.openProgram(self.program)
+            # Create refs to all the managers that ghidra has lol
+            self.base_addr = self.program.getImageBase()
+            self.fm = self.program.getFunctionManager()
+            self.st = self.program.getSymbolTable()
+            self.ref_m = self.program.getReferenceManager()
+            self.lang_description = self.program.getLanguage().getLanguageDescription()
+            self.bb_model = BasicBlockModel(self.program)
+            self.listing = self.program.getListing()
+            self.monitor = ConsoleTaskMonitor()
+            self.decomp = DecompInterface()
+            self.decomp.setOptions(DecompileOptions())
+            self.decomp.openProgram(self.program)
+        except java.lang.OutOfMemoryError as ex:
+            logger.critical(ex.stacktrace())
+            return False
 
         return True
 

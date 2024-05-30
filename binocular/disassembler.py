@@ -306,7 +306,7 @@ class Disassembler(ABC):
 
     def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
         '''Return comments at the instruction'''
-        raise None
+        return None
 
     ############################################
     # REQUIRED DISASSEMBLER DEFINED OPERATIONS #
