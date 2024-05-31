@@ -112,7 +112,7 @@ class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    sha256: Mapped[int] = mapped_column(Integer, index=True)
+    sha256:Mapped[str] = mapped_column(String(32), unique=True, index=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
     address: Mapped[int]
     binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
