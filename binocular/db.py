@@ -4,7 +4,7 @@ from typing import Optional, List, Type
 
 from .consts import Endian, IL, RefType
 
-from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, func
+from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, func, BigInteger
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship, Session
 from checksec.elf import PIEType, RelroType
 
@@ -81,7 +81,7 @@ class BinaryORM(Base):
     bitness:Mapped[int]
     entrypoint: Mapped[Optional[int]]
     os:Mapped[Optional[str]]
-    base_addr:Mapped[int]
+    base_addr:Mapped[int] = mapped_column(BigInteger())
     dynamic_libs:Mapped[Optional[str]]
     strings: Mapped[List[StringsORM]] = relationship(secondary=string_pivot)
 
@@ -116,7 +116,7 @@ class NativeFunctionORM(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     sha256:Mapped[str] = mapped_column(String(64), index=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
-    address: Mapped[int]
+    address: Mapped[int] = mapped_column(BigInteger())
     binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
     binary: Mapped[BinaryORM] = relationship(back_populates='functions')
     
@@ -198,7 +198,7 @@ class BasicBlockORM(Base):
     __tablename__ = "basic_blocks"
     
     id: Mapped[int] = mapped_column(primary_key=True)
-    address: Mapped[int]
+    address: Mapped[int] = mapped_column(BigInteger())
     endianness: Mapped[Endian]
     architecture: Mapped[str]
     bitness:Mapped[int]
@@ -213,8 +213,8 @@ class ReferenceORM(Base):
     __tablename__ = "references"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    from_addr: Mapped[int]
-    to_addr: Mapped[int]
+    from_addr: Mapped[int] = mapped_column(BigInteger())
+    to_addr: Mapped[int] = mapped_column(BigInteger())
     type: Mapped[RefType]
     basic_block_id:Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
     basic_block:Mapped[BasicBlockORM] = relationship(back_populates='xrefs')
