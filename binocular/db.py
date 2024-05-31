@@ -86,7 +86,7 @@ class BinaryORM(Base):
     compiler: Mapped[Optional[str]]
     compilation_flags: Mapped[Optional[str]]
     
-    sha256:Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    sha256:Mapped[str] = mapped_column(String(64), unique=True, index=True)
     nx:Mapped[bool]
     pie:Mapped[PIEType]
     canary:Mapped[bool]
@@ -112,7 +112,7 @@ class NativeFunctionORM(Base):
     __tablename__ = "native_functions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    sha256:Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    sha256:Mapped[str] = mapped_column(String(64), unique=True, index=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
     address: Mapped[int]
     binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
@@ -247,7 +247,7 @@ class SourceFunctionORM(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name:Mapped[str] = mapped_column(String(64), index=True)
-    sha256:Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    sha256:Mapped[str] = mapped_column(String(64), unique=True, index=True)
     lang: Mapped[str]
     decompiled:Mapped[bool]
     # compiled_id: Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
