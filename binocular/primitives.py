@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 import pyvex
 
 
-from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM
+from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, MAX_STR_SIZE
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 
@@ -820,7 +820,7 @@ class Binary(NativeCode):
     
     def orm(self):
         name = NameORM(name=self.filename)
-        strings = [StringsORM(value=s) for s in self.strings]
+        strings = [StringsORM(value=s[:MAX_STR_SIZE]) for s in self.strings]
     
         metainfo = MetaInfo(
             path=str(self._path),

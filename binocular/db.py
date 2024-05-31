@@ -8,6 +8,8 @@ from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, func
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship, Session
 from checksec.elf import PIEType, RelroType
 
+MAX_STR_SIZE = 512
+
 class Base(DeclarativeBase):
     pass
 
@@ -55,7 +57,7 @@ class NameORM(Base):
 class StringsORM(Base):
     __tablename__ = "strings"
     id: Mapped[int] = mapped_column(primary_key=True)
-    value: Mapped[str] = mapped_column(String(512))
+    value: Mapped[str] = mapped_column(String(MAX_STR_SIZE))
 
 class MetaInfo(Base):
     __tablename__ = "metainfo"
