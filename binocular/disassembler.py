@@ -39,25 +39,25 @@ class Disassembler(ABC):
     def __exit__(self, type, value, tb):
         self.close()
 
-    def disassm_name(self):
+    def name(self):
         return self.__class__.__name__
 
     def load(self, path):
         '''Load a binary into the disassembler and trigger any default analysis'''
-        logger.info(f"[{self.disassm_name()}] Analyzing {path}")
+        logger.info(f"[{self.name()}] Analyzing {path}")
         self._binary_filepath = path
 
         start = time.time()
         if not self.analyze(self._binary_filepath):
             raise Disassembler.FailedToLoadBinary
-        logger.info(f"[{self.disassm_name()}] Analysis Complete: {time.time() - start:.2f}s")
+        logger.info(f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s")
 
         start=time.time()
         self._pre_normalize(path)
         self._create_binary()
         self._create_functions()
         self._post_normalize()
-        logger.info(f"[{self.disassm_name()}] Parsing Complete: {time.time() - start:.2f}s")
+        logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
 
     def _pre_normalize(self, path):
         pass
@@ -89,7 +89,7 @@ class Disassembler(ABC):
 
         self.functions = set()
 
-        logger.info(f"[{self.disassm_name()}] Binary Data Loaded: {time.time() - start:.2f}s")
+        logger.info(f"[{self.name()}] Binary Data Loaded: {time.time() - start:.2f}s")
 
     def _create_functions(self):
         start = time.time()
@@ -137,7 +137,7 @@ class Disassembler(ABC):
             if len(f.basic_blocks) > 0:
                 f.end = set((bb for bb, out_degree in f.cfg.out_degree() if out_degree == 0))
             elif not f.thunk:
-                logger.warn(f"[{self.disassm_name()}] {func_name} @ {addr} has 0 Basic Blocks")
+                logger.warn(f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
         
         # 2nd pass to do callee/callers
         for func_ctxt in self.get_func_iterator():
@@ -156,11 +156,11 @@ class Disassembler(ABC):
                     f.calls.add(callee)
 
         run_time = time.time() - start
-        logger.info(f"[{self.disassm_name()}] {self._bb_count} Basic Blocks Loaded")
+        logger.info(f"[{self.name()}] {self._bb_count} Basic Blocks Loaded")
         
-        logger.info(f"[{self.disassm_name()}] {count} Functions Loaded")
-        logger.info(f"[{self.disassm_name()}] Function Data Loaded: {run_time:.2f}s")
-        logger.info(f"[{self.disassm_name()}] Ave Function Load Time: {run_time/count:.2f}s")
+        logger.info(f"[{self.name()}] {count} Functions Loaded")
+        logger.info(f"[{self.name()}] Function Data Loaded: {run_time:.2f}s")
+        logger.info(f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
     def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function, xrefs:Set[Reference]):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
@@ -194,7 +194,7 @@ class Disassembler(ABC):
             self._bbs[bb_addr] = bb
 
         if len(xrefs) > 0 and len(f.basic_blocks) > 0:
-            logger.warn(f"[{self.disassm_name()}] {len(xrefs)} XRefs not in function: {xrefs}")
+            logger.warn(f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
     
     def _create_instructions(self, bb_addr:int, bb_ctxt:Any, bb:BasicBlock, func_ctxt:Any):
         cur_addr = bb_addr

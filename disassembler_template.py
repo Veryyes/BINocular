@@ -22,6 +22,10 @@ class TemplateDisassm(Disassembler):
         '''Release/Free up any resources'''
         pass
 
+    def clear(self):
+        '''Reset any state within this object'''
+        return super().clear()
+
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         return super().get_strings(binary_io, file_size)
 
@@ -135,6 +139,18 @@ class TemplateDisassm(Disassembler):
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
         raise NotImplementedError
        
+    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        '''Return the address to functions that call func_ctxt'''
+        raise NotImplementedError
+
+    def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+        '''Return the address to functions that are called in func_ctxt'''
+        raise NotImplementedError
+
+    def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
+        '''Returns an iterable of references within a function'''
+        raise NotImplementedError
+
     def get_func_bb_iterator(self, addr:int, func_ctxt:Any) -> Iterable[Any]:
         '''
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
