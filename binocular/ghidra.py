@@ -302,15 +302,17 @@ class Ghidra(Disassembler):
 
         proto = high_func.getFunctionPrototype()
 
-        # TODO handle var args
-        # if func_ctxt.hasVarArgs() ...
-
-        return [
+        args = [
             Argument(
                 data_type = str(proto.getParam(i).getDataType()),
                 var_name = str(proto.getParam(i).getName())
             ) for i in range(proto.getNumParams())
         ]
+        
+        if func_ctxt.hasVarArgs():
+            args.append(Argument(data_type=None, var_name=None, var_args=True))
+
+        return args
     
     def get_func_return_type(self, addr:int, func_ctxt:Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
