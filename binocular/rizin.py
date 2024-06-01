@@ -109,7 +109,7 @@ class Rizin(Disassembler):
             path = str(path)
 
         if not os.path.exists(path) or os.path.isdir(path):
-            raise FileNotFoundError
+            return False, f"File not Found: {path}"
 
         if self.rizin_home is not None:
             self._pipe = rzpipe.open(path, rizin_home=self.rizin_home)
@@ -122,7 +122,7 @@ class Rizin(Disassembler):
         self._pipe.cmd('aaaa')
         self._bin_info = self._pipe.cmdj('ij')['bin']
         
-        return True
+        return True, None
 
     def _post_normalize(self):
         del self._caller_cache

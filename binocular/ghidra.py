@@ -205,9 +205,9 @@ class Ghidra(Disassembler):
             self.decomp.openProgram(self.program)
         except java.lang.OutOfMemoryError as ex:
             logger.critical(ex.stacktrace())
-            return False
+            return False, "java.lang.OutOfMemoryError"
 
-        return True
+        return True, None
 
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''
@@ -473,5 +473,12 @@ class Ghidra(Disassembler):
 
     def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
         '''Return comments at the instruction'''
-        # TODO need to implement
-        return ""
+        from ghidra.program.model.listing import CodeUnit
+        curr_instr = self.listing.getInstructionAt(self._mk_addr(instr_addr))
+        comments = list()
+        comments.append(curr_instr.getComment(CodeUnit.PLATE_COMMENT))
+        comments.append(curr_instr.getComment(CodeUnit.PRE_COMMENT))
+        comments.append(curr_instr.getComment(CodeUnit.EOL_COMMENT))
+        comments.append(curr_instr.getComment(CodeUnit.POST_COMMENT))
+
+        return "\n".join([c for c in comments if c is not None])

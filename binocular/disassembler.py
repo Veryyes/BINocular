@@ -48,8 +48,9 @@ class Disassembler(ABC):
         self._binary_filepath = path
 
         start = time.time()
-        if not self.analyze(self._binary_filepath):
-            raise Disassembler.FailedToLoadBinary
+        success, err_msg = self.analyze(self._binary_filepath)
+        if not success:
+            raise Disassembler.FailedToLoadBinary(err_msg)
         logger.info(f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s")
 
         start=time.time()
