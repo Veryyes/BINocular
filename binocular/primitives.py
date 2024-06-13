@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Union, Set, IO, Optional, Iterable, Any, Type
 from functools import cached_property
 from pathlib import Path
+from collections import defaultdict
 import os
 import tempfile
 import hashlib
@@ -16,10 +17,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 import pyvex
 
-
 from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, MAX_STR_SIZE
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
+from .source import C_Code
+
+parsers = defaultdict(lambda: None)
+parsers['C'] = C_Code
 
 class Backend:
     engine:Engine = None
@@ -115,9 +119,10 @@ class Reference(BaseModel):
 
 class Argument(BaseModel):
     '''Represents a single argument in a function'''
-    data_type: Optional[str]
-    var_name: Optional[str]
+    data_type: Optional[str] = None
+    var_name: Optional[str] = None
     var_args: bool = False
+    is_func_ptr: bool = False
     # TODO pydantic alias fields
     # so we can represent args in multiple langs?
 
@@ -127,14 +132,21 @@ class Argument(BaseModel):
     @classmethod
     def from_literal(cls, data:Any) -> Any:
         if isinstance(data, str):
+            data = data.strip()
+
             if data == "...":
                 return Argument(
                     data_type=None,
                     var_name=None,
                     var_args=True
                 )
+            data_type, var_name = data.rsplit(" ", 1)
 
-            data_type, var_name = data.strip().rsplit(" ", 1)
+            # move pointer to the data type
+            while var_name.startswith("*"):
+                data_type += '*'
+                var_name = var_name[1:]
+
             return Argument(
                 data_type=data_type,
                 var_name=var_name,
@@ -402,8 +414,11 @@ class BasicBlock(NativeCode):
 
 class Function(NativeCode):
     _backend: Backend = Backend()
+    _context: Any = None
     _block_cache: Dict[int, Optional[BasicBlock]] = dict()
     _binary: Binary = None
+    _calls: Set[Function] = None
+    _callers: Set[Function] = None
 
     address: Optional[int] = None
     pie:Optional[PIEType] = None
@@ -420,8 +435,44 @@ class Function(NativeCode):
     start: Optional[BasicBlock] = None
     end: Set[BasicBlock] = set([])
     
-    calls: Set[Function] = set([])
-    callers: Set[Function] = set([])
+    @cached_property
+    def calls(self):
+        if self._calls is not None:
+            return self._calls
+
+        if self._backend.db is not None:
+            with Session(self._backend.db) as s:
+                self.sha256
+                stmt = select(NativeFunctionORM).where(NativeFunctionORM.sha256 == self.sha256)
+                f = s.execute(stmt).first()
+                if f.calls is not None:
+                    self._calls = set(f.calls)
+                    return self._calls
+        
+        if self._backend.disassembler is not None:
+            self._calls = set(self._backend.disassembler.get_func_callees(self.address, self._context))
+            return self._calls
+
+        return set()
+
+    @cached_property
+    def callers(self):
+        if self._callers is not None:
+            return self._callers
+
+        if self._backend.db is not None:
+            with Session(self._backend.db) as s:
+                self.sha256
+                stmt = select(NativeFunctionORM).where(NativeFunctionORM.sha256 == self.sha256)
+                f = s.execute(stmt).first()
+                if f.callers is not None:
+                    self._callers = set(f.callers)
+                    return self._callers
+        
+        if self._backend.disassembler is not None:
+            self._callers = set(self._backend.disassembler.get_func_callers(self.address, self._context))
+            return self._callers
+            
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -441,9 +492,7 @@ class Function(NativeCode):
             stack_frame_size=orm.stack_frame_size,
             return_type=orm.return_type,
             thunk=orm.thunk,
-            argv=[Argument.from_literal(arg) for arg in orm.argv.split(",")],
-            calls=set(orm.calls),
-            callers=set(orm.callers)
+            argv=[Argument.from_literal(arg) for arg in orm.argv.split(",") if len(orm.argv) > 0],
         )
         for var in orm.variables:
             f.variables.append(Variable.from_orm(var))
@@ -637,14 +686,16 @@ class Function(NativeCode):
         
         session.commit()
 
-
 class FunctionSource(BaseModel):
     _backend: Backend = Backend()
+    _tree_sitter_root = None
 
     lang:str = "C"
     name:str
     decompiled:bool
     source: str
+    argv: Optional[List[Argument]] = list()
+    return_type: Optional[str] = ""
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -656,8 +707,36 @@ class FunctionSource(BaseModel):
             lang=orm.lang,
             decompiled=orm.decompiled,
             source=orm.source,
-            name=orm.name
+            name=orm.name,
+            return_type = orm.return_type,
+            argv=[Argument.from_literal(arg) for arg in orm.argv.split(",") if len(orm.argv) > 0],
         )
+
+    @classmethod
+    def from_file(cls, fname:str, filepath:str, lang:str='C', is_decompiled=False):
+        with open(filepath, 'rb') as f:
+            return cls.from_code(fname, f.read(), lang=lang, is_decompiled=is_decompiled)
+
+    @classmethod
+    def from_code(cls, fname:str, source:Union[str, bytes], encoding:str='utf8', lang:str='C', is_decompiled=False):
+        if isinstance(source, str):
+            source = bytes(source, encoding)
+
+        parser = parsers[lang]
+        if parser is None:
+            raise NotImplementedError(f"No support for {lang}")
+
+        f_root = parser.find_func(fname, source, encoding=encoding)
+
+        if f_root is None:
+            return None
+
+        src_func_dict = parser.normalize(f_root, encoding=encoding)
+        src_func_dict['decompiled'] = is_decompiled
+        
+        function_source = cls.model_validate(src_func_dict)
+        function_source._tree_sitter_root = f_root
+        return function_source
 
     def orm(self):
         return SourceFunctionORM(
@@ -666,6 +745,8 @@ class FunctionSource(BaseModel):
             lang=self.lang,
             decompiled=self.decompiled,
             source=self.source,
+            return_type=self.return_type,
+            argv=", ".join(str(arg) for arg in self.argv)
         )
 
     def __hash__(self):

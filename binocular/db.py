@@ -252,10 +252,10 @@ class SourceFunctionORM(Base):
     sha256:Mapped[str] = mapped_column(String(64), unique=True, index=True)
     lang: Mapped[str]
     decompiled:Mapped[bool]
-    # compiled_id: Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
-    # compiled: Mapped[NativeFunctionORM] = relationship(back_populates='sources')
     compiled: Mapped[List[NativeFunctionORM]] = relationship(secondary=source_compile_pivot, back_populates='sources')
     source:Mapped[str]
+    return_type:Mapped[str]
+    argv:Mapped[str]
 
     @classmethod
     def select_hash(cls, session, hash:str):

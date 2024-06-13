@@ -115,17 +115,30 @@ class Disassembler(ABC):
                 variables=[v for v in self.get_func_vars(addr, func_ctxt)]
             )
             f._binary = self.binary
+            f._context = func_ctxt
 
             count += 1
 
             decompiled_code = self.get_func_decomp(addr, func_ctxt)
+
             dsrc = None
             if decompiled_code is not None:
-                dsrc = FunctionSource(
-                    decompiled=True,
-                    name=func_name,
-                    source=decompiled_code
+                dsrc = FunctionSource.from_code(
+                    fname = func_name,
+                    source = decompiled_code,
+                    is_decompiled=True
                 )
+                if dsrc is None:
+                    # Failed to parse source with tree sitter :(
+                    # Random notes: some disassemblers like to inject extra things into the decompiled source
+                    # i.e. it's not true C code. 
+                    # e.g., adding annotations like 'processEntry': `void processEntry _start(undefined8 param_1,undefined8 param_2)``
+                    dsrc = FunctionSource(
+                        name=func_name,
+                        decompiled=True,
+                        source=decompiled_code,
+                    )
+
                 f.sources.add(dsrc)
 
             xrefs = set(self.get_func_xrefs(addr, func_ctxt))
@@ -146,11 +159,13 @@ class Disassembler(ABC):
             func_name = self.get_func_name(addr, func_ctxt)
             f = self._func_addrs[addr]
 
+            f._callers = set()
             for caller_addr in self.get_func_callers(addr, func_ctxt):
                 caller = self._func_addrs.get(caller_addr, None)
                 if caller is not None:
-                    f.callers.add(caller)
+                    f._callers.add(caller)
             
+            f._calls = set()
             for callee_addr in self.get_func_callees(addr, func_ctxt):
                 callee = self._func_addrs.get(callee_addr, None)
                 if callee is not None:
