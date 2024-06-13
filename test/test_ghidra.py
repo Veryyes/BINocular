@@ -2,6 +2,11 @@ import itertools
 
 from binocular import Ghidra, Binary
 
+# Necessary for testing
+# on close(), jpype's JVM shutdown is called and 
+# the JVM in this python process cannot be launched again 
+Ghidra._DONT_SHUTDOWN_JVM = True
+
 def test_disassm(make):
     assert Ghidra.is_installed()
     with Ghidra() as g:       

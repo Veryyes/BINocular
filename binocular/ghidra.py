@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class Ghidra(Disassembler):
-    
+    _DONT_SHUTDOWN_JVM = False
+
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
     RELEASE_URL = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0.2_build/ghidra_11.0.2_PUBLIC_20240326.zip"
     DEFAULT_PROJECT_PATH = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
@@ -113,7 +114,7 @@ class Ghidra(Disassembler):
                 self.project.save(self.program)
             self.project.close()
 
-        if jpype.isJVMStarted():
+        if jpype.isJVMStarted() and not self.__class__._DONT_SHUTDOWN_JVM:
             jpype.shutdownJVM()
 
     def clear(self):

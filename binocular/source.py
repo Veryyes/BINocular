@@ -75,9 +75,6 @@ class C_Code:
             name = cls.get_name(node)
             if name == function_name:
                 return node
-            # id_node = find_type(node, 'identifier')
-            # if id_node is not None and str(id_node.text, encoding=encoding) == function_name:
-            #     return node
 
         return None
 

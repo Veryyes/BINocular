@@ -633,6 +633,9 @@ class Function(NativeCode):
 
             if not self.thunk:
                 for src in self.sources:
+                    if src is None:
+                        continue
+
                     if not SourceFunctionORM.exists_hash(session, src.sha256):
                         src_orm = src.orm()
                         src_orm.compiled.append(f_orm)
@@ -727,7 +730,6 @@ class FunctionSource(BaseModel):
             raise NotImplementedError(f"No support for {lang}")
 
         f_root = parser.find_func(fname, source, encoding=encoding)
-
         if f_root is None:
             return None
 
@@ -1034,6 +1036,10 @@ class Binary(NativeCode):
         if self._functions is not None:
             return self._functions
 
+        if self._backend.disassembler is not None:
+            self._functions = self._backend.disassembler.functions
+            return self._functions
+
         if self._backend.db is not None:
             with Session(self._backend.db) as s:
                 # TODO check if binary is even in db first
@@ -1047,10 +1053,6 @@ class Binary(NativeCode):
                     self._functions = [Function.from_orm(f) for f in bin_orm[0].functions]
                     return self._functions
         
-        if self._backend.disassembler is not None:
-            self._functions = self._backend.disassembler.functions
-            return self._functions
-
         # Unable to recover or retrieve functions
         return set()
     
