@@ -133,9 +133,9 @@ class Rizin(Disassembler):
         return install_dir
 
 
-    def __init__(self, verbose=True, rizin_home:str=None) -> None:
+    def __init__(self, verbose=True, home:str=None) -> None:
         super().__init__(verbose=verbose)
-        self.rizin_home = rizin_home
+        self.rizin_home = home
         self._pipe = None
 
         self._bin_info = None

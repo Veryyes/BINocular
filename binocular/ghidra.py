@@ -174,7 +174,7 @@ class Ghidra(Disassembler):
         
         return os.path.exists(os.path.join(install_dir, "support", "launch.sh"))
 
-    def __init__(self, verbose=True, project_path:str=None, ghidra_home=None, save_on_close=False, jvm_args:Iterable[str]=None):
+    def __init__(self, verbose=True, project_path:str=None, home=None, save_on_close=False, jvm_args:Iterable[str]=None):
         super().__init__(verbose=verbose)
 
         self.project = None
@@ -189,10 +189,10 @@ class Ghidra(Disassembler):
             project_path = Ghidra.DEFAULT_PROJECT_PATH
         self.base_project_path = project_path
 
-        if ghidra_home is None:
+        if home is None:
             self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL, os.listdir(Ghidra.DEFAULT_INSTALL)[0])
         else:
-            self.ghidra_home = ghidra_home
+            self.ghidra_home = home
 
         self.save_on_close = save_on_close
         self.decomp_timeout = 60

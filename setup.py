@@ -21,6 +21,10 @@ setup(
         'meson',
         'rzpipe',
         'pyhidra',
+        'tree-sitter',
+        'tree-sitter-c',
+        'requests'
+
     ],
     extra_require = {
         'dev': ['pytest', 'IPython']
