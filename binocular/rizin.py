@@ -1,13 +1,20 @@
 
 from __future__ import annotations
 from collections.abc import Iterable
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from typing import Any, Optional, Tuple, List, IO
 from pathlib import Path
 import os
 import shutil
 import pkgutil
 import binascii
+import requests
+import json
+import logging
+import tempfile
+import lzma
+import tarfile
+from urllib.request import urlopen
 
 from .disassembler import Disassembler
 from .primitives import Section, Instruction, IR, Branch, Argument, Reference, RefType, Variable
@@ -17,54 +24,112 @@ from .utils import run_proc
 from git import Repo
 import git
 import rzpipe
+import coloredlogs
+
+logger = logging.getLogger(__name__)
+coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class Rizin(Disassembler):
 
     GIT_REPO = "https://github.com/rizinorg/rizin.git"
+    GITHUB_API = "https://api.github.com/repos/rizinorg/rizin/releases"
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'rizin')
+
+    @classmethod
+    def list_versions(cls):
+        r = requests.get(cls.GITHUB_API)
+        if r.status_code != 200:
+            raise Exception(f"Cannot reach {cls.GITHUB_API}")
+
+        release_data = json.loads(r.text)
+        versions = list()
+        for release in release_data:
+            ver = release['name'].rsplit(" ", 1)[1]
+            versions.append(ver.strip())
+
+        return versions
+
+    # TODO correctly set 
 
     @classmethod
     def is_installed(cls, install_dir=None) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''
         if install_dir is not None:
-            bin_loc = os.path.join(install_dir, "build", "binrz", "rizin")
-            return os.path.exists(bin_loc)
+            pre_built_loc = os.path.join(install_dir, "bin")
+            build_loc = os.path.join(install_dir, "build", "binrz")
+            return os.path.exists(pre_built_loc) or os.path.exists(build_loc)
 
         sys_install = shutil.which('rizin') is not None
-        local_install = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "build", "binrz", "rizin"))
+        local_install_pre_built = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "bin"))
+        local_install_build = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "build", "binrz", "rizin"))
         
-        return sys_install or local_install
+        return sys_install or local_install_pre_built or local_install_build
 
     @classmethod
-    def install(cls, install_dir=None) -> str:
+    def install(cls, version:str=None, install_dir=None, build=False) -> str:
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
-        print("Installing Rizin")
+        logger.info("Installing Rizin")
 
         if install_dir is None:
             install_dir = Rizin.DEFAULT_INSTALL
 
         os.makedirs(install_dir, exist_ok=True)
-        print(f"Cloning Rizin to: {install_dir}")
-        try:
-            repo = Repo.clone_from(Rizin.GIT_REPO, install_dir)
-        except git.GitCommandError:
-            print("Rizin Already Cloned")
-            repo = Repo(install_dir)
 
-        # Lock in to Version 0.7.2 for now
-        repo.git.checkout("87add99")
+        if build:
+            logger.info(f"Cloning Rizin to: {install_dir}")
+            try:
+                repo = Repo.clone_from(Rizin.GIT_REPO, install_dir)
+            except git.GitCommandError:
+                logger.warn("Rizin Already Cloned")
+                repo = Repo(install_dir)
 
-        cmds = [
-            ["meson", "setup", "build"],
-            ["meson", "compile", "-C", "build"],
-        ]
+            repo.git.checkout(version)
 
-        for cmd in cmds:
-            print(f"$ {' '.join(cmd)}")
-            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
-            print(out)
-            print(err)
+            cmds = [
+                ["meson", "setup", "build"],
+                ["meson", "compile", "-C", "build"],
+            ]
 
+            for cmd in cmds:
+                logger.info(f"$ {' '.join(cmd)}")
+                out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
+                if len(out) > 0:
+                    logger.info(f"[STDOUT] {out}")
+                if len(err) > 0:
+                    logger.info(f"[STDERR] {err}")
+        else:
+            r = requests.get(cls.GITHUB_API)
+            if r.status_code != 200:
+                raise Exception(f"Cannot reach {cls.GITHUB_API}")
+
+            release_data = json.loads(r.text)
+            links = OrderedDict()
+            for release in release_data:
+                ver = release['name'].rsplit(" ", 1)[1]
+                
+                for asset in release['assets']:
+                    # Only supporting linux x86 as of now
+                    if 'static-x86_64' in asset['name']:
+                        dl_link = asset['browser_download_url']
+                        links[ver] = dl_link
+                        break
+                           
+            if version is None:
+                version = next(iter(links.keys()))
+            elif version not in links:
+                logger.critical(f"Rizin version {version} not found")
+                raise Exception(f"Rizin version {version} not found")
+                
+            dl_link = links[version]
+            logger.info(f"Installing Rizin {version} to {install_dir}")
+            with tempfile.TemporaryFile() as fp:
+                fp.write(urlopen(dl_link).read())
+                fp.seek(0)
+                with lzma.open(fp) as xz:
+                    with tarfile.open(fileobj=xz) as tar:
+                        tar.extractall(install_dir)
+            
+        logger.info("Rizin Install Completed")
         return install_dir
 
 
@@ -80,7 +145,8 @@ class Rizin(Disassembler):
 
     def close(self):
         '''Release/Free up any resources'''
-        self._pipe.quit()
+        if self._pipe is not None:
+            self._pipe.quit()
 
     def clear(self):
         super().clear()
@@ -111,13 +177,20 @@ class Rizin(Disassembler):
         if not os.path.exists(path) or os.path.isdir(path):
             return False, f"File not Found: {path}"
 
-        if self.rizin_home is not None:
-            self._pipe = rzpipe.open(path, rizin_home=self.rizin_home)
-        else:
-            try:
-                self._pipe = rzpipe.open(path)
-            except Exception:
-                self._pipe = rzpipe.open(path, rizin_home=os.path.join(Rizin.DEFAULT_INSTALL, "build", "binrz", "rizin"))
+        try:
+            self._pipe = rzpipe.open(path)
+        except Exception:
+            if self.rizin_home is None:
+                self.rizin_home = Rizin.DEFAULT_INSTALL
+
+            pre_built_loc = os.path.join(self.rizin_home, "bin")
+            build_loc = os.path.join(self.rizin_home, "build", "binrz", "rizin")
+            if os.path.exists(pre_built_loc):
+                self._pipe = rzpipe.open(path, rizin_home=pre_built_loc)
+            elif os.path.exists(build_loc):
+                self._pipe = rzpipe.open(path, rizin_home=build_loc)
+            else:
+                raise FileNotFoundError("Can't find rizin binary")
 
         self._pipe.cmd('aaaa')
         self._bin_info = self._pipe.cmdj('ij')['bin']
@@ -203,7 +276,7 @@ class Rizin(Disassembler):
             Argument(
                 data_type=arg['type'],
                 var_name=arg['name']
-            ) for arg in signature['args']
+            ) for arg in signature['args'] if arg.get('type', None) and arg.get('name', None)
         ]
 
     def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:        

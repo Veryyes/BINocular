@@ -14,6 +14,11 @@ class TemplateDisassm(Disassembler):
     def __init__(self) -> None:
         super().__init__()
 
+    @classmethod
+    def list_versions(cls) -> List[str]:
+        '''List installable verions of this disassembler'''
+        return list()
+
     def open(self):
         '''Open up any resources'''
         return self
@@ -70,11 +75,13 @@ class TemplateDisassm(Disassembler):
         '''
         raise NotImplementedError
 
-    def is_installed(self) -> bool:
+    @classmethod
+    def is_installed(cls) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''
         raise NotImplementedError
 
-    def install(self, install_dir=None):
+    @classmethod
+    def install(cls, install_dir=None):
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         raise NotImplementedError   
 

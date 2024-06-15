@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections.abc import Iterable
+from collections import OrderedDict
 from typing import Any, Optional, Tuple, List, IO
 import pkgutil
 import os
@@ -9,42 +10,140 @@ from urllib.request import urlopen
 from functools import lru_cache
 import logging
 import hashlib
-import jpype
+import json
+import shutil
 
 import pyhidra
 from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
 from pyhidra.core import _setup_project, _analyze_program
+import requests
+import jpype
 import coloredlogs
+from git import Repo
+import git
 
 from .disassembler import Disassembler
 from .primitives import Section,Instruction, IR, Argument, Branch, Reference, Variable
 from .consts import Endian, IL, BranchType, RefType
+from .utils import run_proc
 
 logger = logging.getLogger(__name__)
 coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class Ghidra(Disassembler):
     _DONT_SHUTDOWN_JVM = False
-
+    
+    GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
+    GITHUB_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
     DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
-    RELEASE_URL = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0.2_build/ghidra_11.0.2_PUBLIC_20240326.zip"
     DEFAULT_PROJECT_PATH = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
-
+    
     @classmethod
-    def install(cls, install_dir=None) -> str:
-        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
-        if install_dir is None:
-            install_dir = Ghidra.DEFAULT_INSTALL
+    def list_versions(cls):
+        r = requests.get(cls.GITHUB_API)
+        if r.status_code != 200:
+            raise Exception(f"Cannot reach {cls.GITHUB_API}")
 
-        print("Downloading Ghidra")
+        release_data = json.loads(r.text)
+        versions = list()
+        for release in release_data:
+            ver = release['name'].rsplit(" ", 1)[1]
+            versions.append(ver.strip())
+
+        return versions
+        
+    @classmethod
+    def _install_prebuilt(cls, version, install_dir):
+        # Ask Github API for Ghidra Release versions and the
+        # prebuilt download link
+        r = requests.get(Ghidra.GITHUB_API)
+        if r.status_code != 200:
+            logger.critical(f"Cannot reach {Ghidra.GITHUB_API}")
+            raise Exception(f"Cannot reach {Ghidra.GITHUB_API}")
+
+        release_data = json.loads(r.text)
+        links = OrderedDict()
+        for release in release_data:
+            ver = release['name'].rsplit(" ", 1)[1].strip()
+            dl_link = release['assets'][0]['browser_download_url']
+            links[ver] = dl_link
+
+        if version is None:
+            # Version not specified. getting latest
+            version = next(iter(links.keys()))
+        elif version not in links:
+            logger.critical(f"Ghidra version {version} not found")
+            raise Exception(f"Ghidra version {version} not found")
+
+        dl_link = links[version]
+
+        logger.info(f"Installing Ghidra {version} to {install_dir}")
         with tempfile.TemporaryFile() as fp:
-            fp.write(urlopen(Ghidra.RELEASE_URL).read())
+            fp.write(urlopen(dl_link).read())
             fp.seek(0)
-            print("Extracting Ghidra")
+            logger.info("Extracting Ghidra")
             with zipfile.ZipFile(fp, 'r') as zf:
                 zf.extractall(install_dir)
 
-        ghidra_home = os.path.join(install_dir, os.listdir(install_dir)[0])
+        return os.path.join(install_dir, os.listdir(install_dir)[0])
+
+    @classmethod
+    def _build(cls, version, install_dir):
+        logger.info(f"Building Ghidra @ commit {version}")
+
+        # dependency check
+        if shutil.which('java') is None:
+            logger.critical("Can't find java. Is JDK 21 installed? Download here: https://adoptium.net/temurin/releases/")
+            exit(1)
+
+        if shutil.which('gradle') is None:
+            logger.critical("Can't find gradle. Gradle 8.5+ required. Download here: https://gradle.org/releases/")
+            exit(1)
+
+        logger.info(f"Cloning Ghidra {version} to: {install_dir}")
+        try:
+            repo = Repo.clone_from(Ghidra.GIT_REPO, install_dir)
+        except git.GitCommandError:
+            logger.info("Ghidra Already Cloned")
+            repo = Repo(install_dir)
+
+        repo.git.checkout(version)
+
+        cmds = [
+            ["gradle", "-I", "gradle/support/fetchDependencies.gradle", "init"],
+            ["gradle", "buildGhidra"]
+        ]
+
+        for cmd in cmds:
+            logger.info(f"$ {' '.join(cmd)}")
+            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
+            if len(out) > 0:
+                logger.info(f"[STDOUT] {out}")
+            if len(err) > 0:
+                logger.info(f"[STDERR] {err}")
+
+        dist = os.path.join(install_dir, 'build', 'dist')
+        zip_file = os.path.join(dist, os.listdir(dist)[0])
+        with open(zip_file, 'rb') as f:
+            with zipfile.ZipFile(f, 'r') as zf:
+                zf.extractall(dist)
+
+        logger.info("Ghidra Install Completed")
+        return os.path.join(dist, "_".join(os.path.basename(zip_file).split('_')[:3]))
+
+    @classmethod
+    def install(cls, version:str=None, install_dir=None, build=False) -> str:
+        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
+        if install_dir is None:
+            install_dir = Ghidra.DEFAULT_INSTALL
+        
+        os.makedirs(install_dir, exist_ok=True)
+
+        if build:
+            ghidra_home = Ghidra._build(version, install_dir)
+        else:
+            ghidra_home = Ghidra._install_prebuilt(version, install_dir)
+        
         assert os.path.exists(ghidra_home)
 
         # Permission to execute stuff in Ghidra Home
@@ -53,9 +152,12 @@ class Ghidra(Disassembler):
             for fname in files:
                 fpath = os.path.join(root, fname)
                 os.chmod(fpath, 0o775)
-            
-        launcher = pyhidra.HeadlessPyhidraLauncher(install_dir=ghidra_home)
-        launcher.start()
+
+        try:            
+            launcher = pyhidra.HeadlessPyhidraLauncher(install_dir=ghidra_home)
+            launcher.start()
+        except ValueError:
+            logger.warn(f"Unable to install Pyhidra Plugin. Minimum Ghidra version required is 10.3.\nTL;DR Ghidra {version} is installed, but won't be useable for Binocular")
 
         return ghidra_home
 

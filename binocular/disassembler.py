@@ -251,6 +251,11 @@ class Disassembler(ABC):
     # OPTIONAL DISASSEMBLER DEFINED OPERATIONS #
     ############################################
 
+    @classmethod
+    def list_versions(cls) -> List[str]:
+        '''List installable verions of this disassembler'''
+        return list()
+
     def open(self):
         '''Open up any resources'''
         return self
@@ -330,13 +335,13 @@ class Disassembler(ABC):
 
     @classmethod
     @abstractmethod
-    def is_installed(self) -> bool:
+    def is_installed(cls) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''
         raise NotImplementedError
 
     @classmethod
     @abstractmethod
-    def install(self, install_dir=None) -> str:
+    def install(cls, version:str=None, install_dir=None, build=False) -> str:
         '''
         Installs the disassembler to a user specified directory or within the python module if none is specified
         :returns: the directory the disassembler is installed to

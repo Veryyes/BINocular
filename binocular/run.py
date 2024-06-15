@@ -2,6 +2,7 @@ import os
 from enum import Enum
 from pathlib import Path
 from typing_extensions import Annotated
+import string
 
 import typer
 from sqlalchemy.orm import Session
@@ -57,7 +58,38 @@ def parse(
                 b.db_add(s)
                 s.commit()
 
+@app.command()
+def install(
+    disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
+    version: Annotated[str, typer.Option('-v', '--version', help="Version Number or Commit Hash (if applicable) to download, (build), and install ")] = None,
+    path: Annotated[str, typer.Option('-p', '--path', help="Path to install disassembler to")] = None,
+    l: Annotated[bool, typer.Option('-l', '--list', help="List available verions to download and install")] = False,
+):
+    disasm_type = None
+    if disassm == DisassemblerChoice.rizin:
+        disasm_type = Rizin
+    elif disassm == DisassemblerChoice.ghidra:
+        disasm_type = Ghidra
+    else:
+        raise ValueError("Not a supported Disassembler")
+
+    if l:
+        for ver in disasm_type.list_versions():
+            print(ver)
+        return
+
+    build = False
+    if (len(version) == 7 or len(version) == 40) and all(c in string.hexdigits for c in version):
+        build = True
+
+    disasm_type.install(
+        version=version,
+        install_dir=path,
+        build = build
+    )
+
     
+
 
 def main():
     app()
