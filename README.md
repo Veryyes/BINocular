@@ -1,30 +1,24 @@
-# BINocular - Common Binary Framework
+# BINocular - Common Binary Analysis Framework
 
 ## Features
  - Abstraction Layer between Disassemblers (e.g., Ghidra, Binary Ninja, Radare2/Rizin, IDA)
  - Programatically Install Disassemblers or throught command line
- - Common Language and Representation of Binary Analysis Concepts
-   - [ ] Common Executable Formats
-     * [ ] ELF
-     * [ ] PE
-     * [ ] Mach-O
-   - [x] Instructions
+ - Disassembler Agnostic Representation of Common Binary Analysis Primitives and Concepts
+   - [x] Assembly Instructions
    - [x] Intermediate Representations (e.g., pcode)
-   - [ ] Binary Blobs (e.g., flash dump)
    - [x] Functions
      * [x] Compiled (Native) Functions
      * [x] Source Code
-   - [ ] Traces & Execution Paths
    - [x] Control Flow Graphs
    - [ ] Data Flow Graphs
+   - [ ] Traces & Execution Paths
    
-### Treat Binary Analysis Concepts as data (In relation to other objects or standalone)  
+### Treat Binary Analysis Concepts as Data  
  - Serialization/Deserialization
  - Persistent Storage to a Database
  - Common API to query information (e.g., Get all Functions in a Binary)
    - "Hot Swappable" Disassembler Backends (e.g., Ask Ghidra and Binja for the same data w/ minimal code)
- - Common API for analysis (instruction frequency count, cyclomatic complexity of CFG, string table)
-
+     
 ## Installation
 Install the python package using `setup.py`
 
@@ -77,7 +71,6 @@ Inserting to DB
 ```
 
 ## Example Python Usage
-
 
 ```python
 from sqlalchemy.orm import Session
