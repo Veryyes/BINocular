@@ -446,7 +446,7 @@ class Function(NativeCode):
                 stmt = select(NativeFunctionORM).where(NativeFunctionORM.sha256 == self.sha256)
                 f = s.execute(stmt).first()
                 if f.calls is not None:
-                    self._calls = set(f.calls)
+                    self._calls = set([Function.from_orm(callee) for callee in f.calls])
                     return self._calls
         
         if self._backend.disassembler is not None:
@@ -466,7 +466,7 @@ class Function(NativeCode):
                 stmt = select(NativeFunctionORM).where(NativeFunctionORM.sha256 == self.sha256)
                 f = s.execute(stmt).first()
                 if f.callers is not None:
-                    self._callers = set(f.callers)
+                    self._callers = set([Function.from_orm(caller) for caller in f.callers])
                     return self._callers
         
         if self._backend.disassembler is not None:
@@ -630,12 +630,22 @@ class Function(NativeCode):
                 f_orm = self.orm()
                 f_orm.binary = binary
                 session.add(f_orm)
+           
 
             if not self.thunk:
+                sources = list()
                 for src in self.sources:
+                    for src_other in sources:
+                        if src.sha256 == src_other.sha256:
+                            if not src.decompiled and src_other.decompiled:
+                                sources.append(src)
+                            else:
+                                sources.append(src_other)
+
+                for src in sources:
                     if src is None:
                         continue
-
+                     
                     if not SourceFunctionORM.exists_hash(session, src.sha256):
                         src_orm = src.orm()
                         src_orm.compiled.append(f_orm)
@@ -668,7 +678,6 @@ class Function(NativeCode):
                 
                 f_orm.callers.append(c)
 
-
         assert f_orm is not None
 
         for bb in self.basic_blocks:
@@ -681,13 +690,12 @@ class Function(NativeCode):
                     [session.add(ir) for ir in instr.ir]
                 session.add(instr)
             session.add(block_orm)
-
+        
         for var in self.variables:
             var_orm = var.orm()
             f_orm.variables.append(var_orm)
             session.add(var_orm)
         
-        session.commit()
 
 class FunctionSource(BaseModel):
     _backend: Backend = Backend()
@@ -946,6 +954,7 @@ class Binary(NativeCode):
         session.add(b)
         for f in self.functions:
             f.db_add(session, binary=b)
+            session.commit()
             
 
     def set_path(self, path:Union[Path, str]):
