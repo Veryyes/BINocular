@@ -197,6 +197,9 @@ class Ghidra(Disassembler):
         self.save_on_close = save_on_close
         self.decomp_timeout = 60
 
+    def disassm_name(self):
+        return "Ghidra"
+
     def open(self):
         if not PyhidraLauncher.has_launched():
             launcher = HeadlessPyhidraLauncher(install_dir=self.ghidra_home, verbose=False)

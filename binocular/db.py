@@ -252,6 +252,7 @@ class SourceFunctionORM(Base):
     sha256:Mapped[str] = mapped_column(String(64), unique=True, index=True)
     lang: Mapped[str]
     decompiled:Mapped[bool]
+    perfect_decomp:Mapped[bool] # Decompilation matches Source 100%
     compiled: Mapped[List[NativeFunctionORM]] = relationship(secondary=source_compile_pivot, back_populates='sources')
     source:Mapped[str]
     return_type:Mapped[str]

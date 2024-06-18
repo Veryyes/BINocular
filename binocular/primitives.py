@@ -637,9 +637,11 @@ class Function(NativeCode):
                 for src in self.sources:
                     for src_other in sources:
                         if src.sha256 == src_other.sha256:
-                            if not src.decompiled and src_other.decompiled:
+                            if src.decompiled and not src_other.decompiled:
+                                src.perfect_decomp = True
                                 sources.append(src)
-                            else:
+                            elif not src.decompiled and src_other.decompiled:
+                                src_other.perfect_decomp = True
                                 sources.append(src_other)
 
                 for src in sources:
@@ -704,6 +706,7 @@ class FunctionSource(BaseModel):
     lang:str = "C"
     name:str
     decompiled:bool
+    perfect_decomp:Optional[bool] = False
     source: str
     argv: Optional[List[Argument]] = list()
     return_type: Optional[str] = ""
@@ -717,6 +720,7 @@ class FunctionSource(BaseModel):
         return cls(
             lang=orm.lang,
             decompiled=orm.decompiled,
+            perfect_decomp = orm.perfect_decomp,
             source=orm.source,
             name=orm.name,
             return_type = orm.return_type,
@@ -754,6 +758,7 @@ class FunctionSource(BaseModel):
             sha256=self.sha256,
             lang=self.lang,
             decompiled=self.decompiled,
+            perfect_decomp=self.perfect_decomp,
             source=self.source,
             return_type=self.return_type,
             argv=", ".join(str(arg) for arg in self.argv)
