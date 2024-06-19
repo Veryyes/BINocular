@@ -954,7 +954,6 @@ class Binary(NativeCode):
         return b
 
     def db_add(self, session:Session):
-        # TODO check if it exists first
         b = self.orm()
         session.add(b)
         for f in self.functions:

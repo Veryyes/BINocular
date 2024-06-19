@@ -19,9 +19,16 @@ logger = logging.getLogger(__name__)
 coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class Disassembler(ABC):
+    '''
+    Abstract Class for a Disassembler.
+    '''
+
     class FailedToLoadBinary(Exception):
+        '''Raise when a Disassembler fails to load a binary'''
         pass
+
     class ArchitectureNotSupported(Exception):
+        '''Raise when a disassembler receives a binary of an architecture that it does not support'''
         pass
 
     def __init__(self, verbose=True):
@@ -40,10 +47,14 @@ class Disassembler(ABC):
         self.close()
 
     def name(self):
+        '''Returns the Name of the Disassembler'''
         return self.__class__.__name__
 
     def load(self, path):
-        '''Load a binary into the disassembler and trigger any default analysis'''
+        '''
+        Load a binary into the disassembler and trigger any default analysis
+        :param path: The file path to binary to analyze
+        '''
         logger.info(f"[{self.name()}] Analyzing {path}")
         self._binary_filepath = path
 
@@ -59,12 +70,6 @@ class Disassembler(ABC):
         self._create_functions()
         self._post_normalize()
         logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
-
-    def _pre_normalize(self, path):
-        pass
-
-    def _post_normalize(self):
-        pass
 
     def _create_binary(self):
         start = time.time()
@@ -256,6 +261,23 @@ class Disassembler(ABC):
         '''List installable verions of this disassembler'''
         return list()
 
+    def _pre_normalize(self, path):
+        '''
+        Optional Function to Override. _pre_normalize is called before the the binary
+        at `path` is loaded into the underlying disassembler. This function provides
+        a way to add a custom preprocessing step.
+        :param path: path to the binary that is about to be analyzed
+        '''
+        pass
+
+    def _post_normalize(self):
+        '''
+        Optional Function to Override. _post_normalize is called after the the binary
+        at `path` is loaded into the underlying disassembler. This function provides
+        a way to add a custom postprocessing step.
+        '''
+        pass
+
     def open(self):
         '''Open up any resources'''
         return self
@@ -274,8 +296,12 @@ class Disassembler(ABC):
         self.binary = None
         self.functions.clear()
 
-    def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
-        '''Returns the list of defined strings in the binary'''
+    def get_strings(self, binary_io:IO) -> Iterable[str]:
+        '''
+        Returns the list of defined strings in the binary
+        :param binary_io: a file-like object to the binary ingested
+        :returns: list of strings in the file (similar to the strings unix utility)
+        '''
         strings = list()
         printables = bytes(string.printable, 'ascii')
         

@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="BINocular",
-    version="1.0.0",
+    version="1.0",
     description="Common Binary Framework",
     author="Brandon Wong",
     packages = ["binocular"],
@@ -23,11 +23,12 @@ setup(
         'pyhidra',
         'tree-sitter',
         'tree-sitter-c',
-        'requests'
-
+        'requests',
+        'IPython',
+        'sphinx'
     ],
     extra_require = {
-        'dev': ['pytest', 'IPython']
+        'dev': ['pytest', 'sphinx', 'sphinx_rtd_theme', 'sphinx_mdinclude']
     },
     entry_points={
         "console_scripts": ['binocular = binocular.run:main']

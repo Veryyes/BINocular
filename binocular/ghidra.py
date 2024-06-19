@@ -35,9 +35,15 @@ class Ghidra(Disassembler):
     
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
     GITHUB_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
-    DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
-    DEFAULT_PROJECT_PATH = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
     
+    @staticmethod
+    def DEFAULT_INSTALL():
+        return os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
+
+    @staticmethod
+    def DEFAULT_PROJECT_PATH():
+        return os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
+
     @classmethod
     def list_versions(cls):
         r = requests.get(cls.GITHUB_API)
@@ -78,6 +84,7 @@ class Ghidra(Disassembler):
         dl_link = links[version]
 
         logger.info(f"Installing Ghidra {version} to {install_dir}")
+        logger.info(f"Downloading {dl_link}...")
         with tempfile.TemporaryFile() as fp:
             fp.write(urlopen(dl_link).read())
             fp.seek(0)
@@ -135,7 +142,7 @@ class Ghidra(Disassembler):
     def install(cls, version:str=None, install_dir=None, build=False) -> str:
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         if install_dir is None:
-            install_dir = Ghidra.DEFAULT_INSTALL
+            install_dir = Ghidra.DEFAULT_INSTALL()
         
         os.makedirs(install_dir, exist_ok=True)
 
@@ -164,13 +171,13 @@ class Ghidra(Disassembler):
     @classmethod
     def is_installed(cls, install_dir=None) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''
-        os.makedirs(Ghidra.DEFAULT_INSTALL, exist_ok=True)
+        os.makedirs(Ghidra.DEFAULT_INSTALL(), exist_ok=True)
         
         if install_dir is None:
-            if len(os.listdir(Ghidra.DEFAULT_INSTALL)) == 0:
+            if len(os.listdir(Ghidra.DEFAULT_INSTALL())) == 0:
                 return False
 
-            install_dir = os.path.join(Ghidra.DEFAULT_INSTALL, os.listdir(Ghidra.DEFAULT_INSTALL)[0])
+            install_dir = os.path.join(Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
         
         return os.path.exists(os.path.join(install_dir, "support", "launch.sh"))
 
@@ -186,19 +193,16 @@ class Ghidra(Disassembler):
             self.jvm_args = list()
 
         if project_path is None:
-            project_path = Ghidra.DEFAULT_PROJECT_PATH
+            project_path = Ghidra.DEFAULT_PROJECT_PATH()
         self.base_project_path = project_path
 
         if home is None:
-            self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL, os.listdir(Ghidra.DEFAULT_INSTALL)[0])
+            self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
         else:
             self.ghidra_home = home
 
         self.save_on_close = save_on_close
         self.decomp_timeout = 60
-
-    def disassm_name(self):
-        return "Ghidra"
 
     def open(self):
         if not PyhidraLauncher.has_launched():
@@ -395,7 +399,7 @@ class Ghidra(Disassembler):
         '''Return DecompileResult object. lru_cache'd because it's a little expensive'''        
         res = self.decomp.decompileFunction(func_ctxt, self.decomp_timeout, self.monitor)
         if not res.decompileCompleted():
-            logger.warn(f"[{self.disassm_name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
+            logger.warn(f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
             
         return res
     

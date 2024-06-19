@@ -6,6 +6,8 @@ import string
 
 import typer
 from sqlalchemy.orm import Session
+import IPython
+
 from binocular import Backend, Ghidra, Rizin
 
 app = typer.Typer()
@@ -16,21 +18,22 @@ class DisassemblerChoice(Enum):
 
 @app.command()
 def parse(
-    p: Annotated[Path, typer.Argument(help="Path to Binary")],
-    d: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
+    path: Annotated[Path, typer.Argument(help="Path to Binary")],
+    disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
     uri: Annotated[str, typer.Option('-u', '--uri', help="SQL database URI")] = None,
-    quiet: Annotated[bool, typer.Option('-q', '--quiet', help="")] = False
+    quiet: Annotated[bool, typer.Option('-q', '--quiet', help="Don't print anything")] = False,
+    interactive: Annotated[bool, typer.Option('-i', '--ipython', help="Launch an IPython shell after loading")] = False
 ):
     disasm_type = None
-    if d == DisassemblerChoice.rizin:
+    if disassm == DisassemblerChoice.rizin:
         disasm_type = Rizin
-    elif d == DisassemblerChoice.ghidra:
+    elif disassm == DisassemblerChoice.ghidra:
         disasm_type = Ghidra
     else:
         raise ValueError("Not a supported Disassembler")
 
-    if not os.path.exists(p) or os.path.isdir(p):
-        raise ValueError(f"Invalid File: {p}")
+    if not os.path.exists(path) or os.path.isdir(path):
+        raise ValueError(f"Invalid File: {path}")
 
     if uri is not None:
         Backend.set_engine(uri)
@@ -39,7 +42,7 @@ def parse(
         disasm_type.install()
 
     with disasm_type() as disasm:
-        disasm.load(p)
+        disasm.load(path)
         b = disasm.binary
         if not quiet:
             print("Binary:")
@@ -57,6 +60,9 @@ def parse(
                     print("Inserting to DB")
                 b.db_add(s)
                 s.commit()
+
+        if interactive:
+            IPython.embed()
 
 @app.command()
 def install(

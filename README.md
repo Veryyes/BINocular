@@ -1,24 +1,24 @@
 # BINocular - Common Binary Analysis Framework
 
-## Features
- - Abstraction Layer between Disassemblers (e.g., Ghidra, Binary Ninja, Radare2/Rizin, IDA)
- - Programatically Install Disassemblers or throught command line
- - Disassembler Agnostic Representation of Common Binary Analysis Primitives and Concepts
-   - [x] Assembly Instructions
-   - [x] Intermediate Representations (e.g., pcode)
-   - [x] Functions
-     * [x] Compiled (Native) Functions
-     * [x] Source Code
-   - [x] Control Flow Graphs
-   - [ ] Data Flow Graphs
-   - [ ] Traces & Execution Paths
-   
-### Treat Binary Analysis Concepts as Data  
- - Serialization/Deserialization
- - Persistent Storage to a Database
- - Common API to query information (e.g., Get all Functions in a Binary)
-   - "Hot Swappable" Disassembler Backends (e.g., Ask Ghidra and Binja for the same data w/ minimal code)
-     
+BINocular is an python package for static analysis of compiled binaries 
+through a common API layer. It is an abstraction layer between different
+disassemblers and provides:
+
+- Disassembler Agnostic Representation of Common Binary Analysis Primitives and Concepts
+  * Assembly Instructions
+  * Intermediate Representations (e.g., pcode)
+  * Functions
+    - Compiled
+    - Source
+  * Control Flow Graph
+- CLI and API to install supported disassemblers
+- Serialization/Deserialization of concepts (e.g., Functions, Basic Blocks, Instructions)
+- Persistent storage of objects to SQL databases
+
+## Disassembler Backend Support
+### [Ghidra](https://www.ghidra-sre.org/)
+### [Rizin](https://rizin.re/)
+
 ## Installation
 Install the python package using `setup.py`
 

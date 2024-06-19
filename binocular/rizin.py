@@ -33,7 +33,10 @@ class Rizin(Disassembler):
 
     GIT_REPO = "https://github.com/rizinorg/rizin.git"
     GITHUB_API = "https://api.github.com/repos/rizinorg/rizin/releases"
-    DEFAULT_INSTALL = os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'rizin')
+
+    @staticmethod
+    def DEFAULT_INSTALL():
+        return os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'rizin')
 
     @classmethod
     def list_versions(cls):
@@ -49,8 +52,6 @@ class Rizin(Disassembler):
 
         return versions
 
-    # TODO correctly set 
-
     @classmethod
     def is_installed(cls, install_dir=None) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''
@@ -60,8 +61,8 @@ class Rizin(Disassembler):
             return os.path.exists(pre_built_loc) or os.path.exists(build_loc)
 
         sys_install = shutil.which('rizin') is not None
-        local_install_pre_built = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "bin"))
-        local_install_build = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL, "build", "binrz", "rizin"))
+        local_install_pre_built = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL(), "bin"))
+        local_install_build = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL(), "build", "binrz", "rizin"))
         
         return sys_install or local_install_pre_built or local_install_build
 
@@ -71,7 +72,7 @@ class Rizin(Disassembler):
         logger.info("Installing Rizin")
 
         if install_dir is None:
-            install_dir = Rizin.DEFAULT_INSTALL
+            install_dir = Rizin.DEFAULT_INSTALL()
 
         os.makedirs(install_dir, exist_ok=True)
 
@@ -122,6 +123,7 @@ class Rizin(Disassembler):
                 
             dl_link = links[version]
             logger.info(f"Installing Rizin {version} to {install_dir}")
+            logger.info(f"Downloading {dl_link}...")
             with tempfile.TemporaryFile() as fp:
                 fp.write(urlopen(dl_link).read())
                 fp.seek(0)
@@ -181,7 +183,7 @@ class Rizin(Disassembler):
             self._pipe = rzpipe.open(path)
         except Exception:
             if self.rizin_home is None:
-                self.rizin_home = Rizin.DEFAULT_INSTALL
+                self.rizin_home = Rizin.DEFAULT_INSTALL()
 
             pre_built_loc = os.path.join(self.rizin_home, "bin")
             build_loc = os.path.join(self.rizin_home, "build", "binrz", "rizin")
