@@ -10,7 +10,7 @@ from typing import Any, Optional, Tuple, List, Dict, Set, IO
 
 import coloredlogs
 
-from .primitives import (BasicBlock, Binary, Function, FunctionSource,
+from .primitives import (BasicBlock, Binary, NativeFunction, SourceFunction,
                          Instruction, Section, Argument, Branch, IR, Reference, Variable)
 
 from .consts import Endian
@@ -35,8 +35,8 @@ class Disassembler(ABC):
         self.verbose=verbose
 
         self._bb_count = 0
-        self._func_names:Dict[str, Function] = dict()
-        self._func_addrs:Dict[int, Function] = dict()
+        self._func_names:Dict[str, NativeFunction] = dict()
+        self._func_addrs:Dict[int, NativeFunction] = dict()
         self._bbs:Dict[int, BasicBlock] = dict()
         self._instrs:Dict[int, Instruction] = dict()
 
@@ -105,7 +105,7 @@ class Disassembler(ABC):
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
            
-            f = Function(
+            f = NativeFunction(
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
                 bitness=self.binary.bitness,
@@ -128,7 +128,7 @@ class Disassembler(ABC):
 
             dsrc = None
             if decompiled_code is not None:
-                dsrc = FunctionSource.from_code(
+                dsrc = SourceFunction.from_code(
                     fname = func_name,
                     source = decompiled_code,
                     is_decompiled=True
@@ -138,7 +138,7 @@ class Disassembler(ABC):
                     # Random notes: some disassemblers like to inject extra things into the decompiled source
                     # i.e. it's not true C code. 
                     # e.g., adding annotations like 'processEntry': `void processEntry _start(undefined8 param_1,undefined8 param_2)``
-                    dsrc = FunctionSource(
+                    dsrc = SourceFunction(
                         name=func_name,
                         decompiled=True,
                         source=decompiled_code,
@@ -183,7 +183,7 @@ class Disassembler(ABC):
         logger.info(f"[{self.name()}] Function Data Loaded: {run_time:.2f}s")
         logger.info(f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
-    def _create_basicblocks(self, addr:int, func_ctxt:Any, f:Function, xrefs:Set[Reference]):
+    def _create_basicblocks(self, addr:int, func_ctxt:Any, f:NativeFunction, xrefs:Set[Reference]):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
             bb_addr = self.get_bb_addr(bb_ctxt, func_ctxt)
                 
@@ -236,11 +236,11 @@ class Disassembler(ABC):
 
             cur_addr += len(data)
 
-    def function_at(self, address:int) -> Function:
+    def function_at(self, address:int) -> NativeFunction:
         '''Returns a Function at the address specified'''
         return self._func_addrs.get(address, None)
 
-    def function_sym(self, symbol:str) -> Function:
+    def function_sym(self, symbol:str) -> NativeFunction:
         '''Returns a Function with the given symbol names'''
         return self._func_names.get(symbol, None)
 

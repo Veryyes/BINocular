@@ -38,10 +38,12 @@ class Ghidra(Disassembler):
     
     @staticmethod
     def DEFAULT_INSTALL():
+        '''Default Install Location for Ghidra (Within Python Package Installation)'''
         return os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra')
 
     @staticmethod
     def DEFAULT_PROJECT_PATH():
+        '''Default Ghidra Project Path (Within Python Package Installation)'''
         return os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
 
     @classmethod

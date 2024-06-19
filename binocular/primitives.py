@@ -46,7 +46,6 @@ class Backend:
 class NoDBException(Exception):
     pass
 
-
 @dataclass
 class Branch:
     btype: BranchType
@@ -119,10 +118,18 @@ class Reference(BaseModel):
 
 class Argument(BaseModel):
     '''Represents a single argument in a function'''
+
     data_type: Optional[str] = None
+    '''Argument data type (e.g., char, int, short*, struct socket, long(*)(char*))'''
+
     var_name: Optional[str] = None
+    '''Argument Variable Name'''
+
     var_args: bool = False
+    '''True when the argument is Variadic (i.e. more than one argument, like printf)'''
+
     is_func_ptr: bool = False
+    
     # TODO pydantic alias fields
     # so we can represent args in multiple langs?
 
@@ -268,7 +275,7 @@ class Instruction(NativeCode):
 
 class BasicBlock(NativeCode): 
     _backend: Backend = Backend()
-    _function: Optional[Function] = None
+    _function: Optional[NativeFunction] = None
 
     address: int = None
     pie:PIEType = None
@@ -358,7 +365,7 @@ class BasicBlock(NativeCode):
     def set_disassembler(self, disassembler:"Disassembler"):
         self._backend.disassembler=disassembler
 
-    def set_function(self, func:Function):
+    def set_function(self, func:NativeFunction):
         self._function = func
 
     @cached_property
@@ -412,13 +419,13 @@ class BasicBlock(NativeCode):
             if instr.ir is not None:
                 [session.add(ir) for ir in instr.ir]
 
-class Function(NativeCode):
+class NativeFunction(NativeCode):
     _backend: Backend = Backend()
     _context: Any = None
     _block_cache: Dict[int, Optional[BasicBlock]] = dict()
     _binary: Binary = None
-    _calls: Set[Function] = None
-    _callers: Set[Function] = None
+    _calls: Set[NativeFunction] = None
+    _callers: Set[NativeFunction] = None
 
     address: Optional[int] = None
     pie:Optional[PIEType] = None
@@ -428,7 +435,7 @@ class Function(NativeCode):
     argv: List[Argument] = None
     variables: List[Variable] = list()
     stack_frame_size: int = 0
-    sources: Set[FunctionSource] = set([])
+    sources: Set[SourceFunction] = set([])
     thunk:bool = False
 
     basic_blocks: Set[BasicBlock] = set([])
@@ -446,7 +453,7 @@ class Function(NativeCode):
                 stmt = select(NativeFunctionORM).where(NativeFunctionORM.sha256 == self.sha256)
                 f = s.execute(stmt).first()
                 if f.calls is not None:
-                    self._calls = set([Function.from_orm(callee) for callee in f.calls])
+                    self._calls = set([NativeFunction.from_orm(callee) for callee in f.calls])
                     return self._calls
         
         if self._backend.disassembler is not None:
@@ -466,7 +473,7 @@ class Function(NativeCode):
                 stmt = select(NativeFunctionORM).where(NativeFunctionORM.sha256 == self.sha256)
                 f = s.execute(stmt).first()
                 if f.callers is not None:
-                    self._callers = set([Function.from_orm(caller) for caller in f.callers])
+                    self._callers = set([NativeFunction.from_orm(caller) for caller in f.callers])
                     return self._callers
         
         if self._backend.disassembler is not None:
@@ -501,17 +508,17 @@ class Function(NativeCode):
             f.basic_blocks.add(BasicBlock.from_orm(bb))
 
         for src_f in orm.sources:
-            f.sources.add(FunctionSource.from_orm(src_f))
+            f.sources.add(SourceFunction.from_orm(src_f))
 
         return f
 
     def __hash__(self):
         return int(self.sha256, 16)
 
-    def __eq__(self, other:Function) -> bool:
+    def __eq__(self, other:NativeFunction) -> bool:
         return hash(self) == hash(other)
     
-    def __ne__(self, other:Function) -> bool:
+    def __ne__(self, other:NativeFunction) -> bool:
         return hash(self) != hash(other)
 
     def __contains__(self, x:Union[BasicBlock, Instruction, bytes]):
@@ -699,7 +706,7 @@ class Function(NativeCode):
             session.add(var_orm)
         
 
-class FunctionSource(BaseModel):
+class SourceFunction(BaseModel):
     _backend: Backend = Backend()
     _tree_sitter_root = None
 
@@ -825,7 +832,7 @@ class Binary(NativeCode):
     _bytes: bytes = None
     _size: int = None
 
-    _functions: Set[Function] = None   
+    _functions: Set[NativeFunction] = None   
 
     filename: Optional[Union[str, List[str]]] = None
     names: List[str] = []
@@ -894,7 +901,7 @@ class Binary(NativeCode):
         b.set_path(orm.metainfo.path)
 
         for f in orm.functions:
-            func = Function.from_orm(f)
+            func = NativeFunction.from_orm(f)
             b.functions.add(func)
 
         return b
@@ -907,8 +914,8 @@ class Binary(NativeCode):
     def __hash__(self):
         return int(self.sha256, 16)
     
-    def __contains__(self, x:Union[Function, BasicBlock, Instruction, bytes]):
-        if isinstance(x, Function):
+    def __contains__(self, x:Union[NativeFunction, BasicBlock, Instruction, bytes]):
+        if isinstance(x, NativeFunction):
             return x in self.functions
         elif isinstance(x, BasicBlock) or isinstance(x, Instruction) or isinstance(x, bytes):
             return any([x in f for f in self.functions])
@@ -1045,7 +1052,7 @@ class Binary(NativeCode):
 
     @computed_field(repr=True)
     @property
-    def functions(self) -> Iterable[Function]:
+    def functions(self) -> Iterable[NativeFunction]:
         if self._functions is not None:
             return self._functions
 
@@ -1063,7 +1070,7 @@ class Binary(NativeCode):
                 stmt = select(BinaryORM).where(BinaryORM.sha256 == self.sha256)
                 bin_orm = s.execute(stmt).first()
                 if bin_orm is not None:
-                    self._functions = [Function.from_orm(f) for f in bin_orm[0].functions]
+                    self._functions = [NativeFunction.from_orm(f) for f in bin_orm[0].functions]
                     return self._functions
         
         # Unable to recover or retrieve functions

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional, List, Type
+from typing import Optional, List
 
 from .consts import Endian, IL, RefType
 
-from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, func, BigInteger
-from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship, Session
+from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, BigInteger
+from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship
 from checksec.elf import PIEType, RelroType
 
 MAX_STR_SIZE = 512
@@ -245,7 +245,7 @@ class IR_ORM(Base):
     instruction: Mapped[InstructionORM] = relationship(back_populates='ir')
 
 class SourceFunctionORM(Base):
-    __tablename__ = "source"
+    __tablename__ = "source_functions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name:Mapped[str] = mapped_column(String(64), index=True)
