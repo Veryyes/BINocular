@@ -6,13 +6,13 @@
 Welcome to BINocular's documentation!
 =====================================
 
-.. mdinclude:: ../README.md
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
-   modules
+   binocular
+
+.. mdinclude:: ../README.md
 
 Indices and tables
 ==================
