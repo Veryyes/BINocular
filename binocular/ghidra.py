@@ -137,7 +137,6 @@ class Ghidra(Disassembler):
             with zipfile.ZipFile(f, 'r') as zf:
                 zf.extractall(dist)
 
-        logger.info("Ghidra Install Completed")
         return os.path.join(dist, "_".join(os.path.basename(zip_file).split('_')[:3]))
 
     @classmethod
@@ -153,6 +152,7 @@ class Ghidra(Disassembler):
         else:
             ghidra_home = Ghidra._install_prebuilt(version, install_dir)
         
+        logger.info("Ghidra Install Completed")
         assert os.path.exists(ghidra_home)
 
         # Permission to execute stuff in Ghidra Home

@@ -37,7 +37,7 @@ func_name_pivot = Table(
 source_compile_pivot = Table(
     "source_compiled_pivot",
     Base.metadata,
-    Column("source_id", ForeignKey("source.id")),
+    Column("source_id", ForeignKey("source_functions.id")),
     Column("compiled_id", ForeignKey("native_functions.id")),
 )
 

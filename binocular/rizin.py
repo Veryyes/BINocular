@@ -261,6 +261,10 @@ class Rizin(Disassembler):
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj('afsj')
         name = signature['name']
+
+        if name.startswith("dbg."):
+            name = name[len("dbg."):]
+
         if name.startswith("sym."):
             name = name[len("sym."):]
 

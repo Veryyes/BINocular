@@ -85,7 +85,7 @@ def install(
         return
 
     build = False
-    if (len(version) == 7 or len(version) == 40) and all(c in string.hexdigits for c in version):
+    if version is not None and (len(version) == 7 or len(version) == 40) and all(c in string.hexdigits for c in version):
         build = True
 
     disasm_type.install(
