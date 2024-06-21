@@ -257,6 +257,7 @@ class SourceFunctionORM(Base):
     source:Mapped[str]
     return_type:Mapped[str]
     argv:Mapped[str]
+    qualifiers:Mapped[str]
 
     @classmethod
     def select_hash(cls, session, hash:str):

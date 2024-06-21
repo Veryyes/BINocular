@@ -645,11 +645,11 @@ class NativeFunction(NativeCode):
                     for src_other in sources:
                         if src.sha256 == src_other.sha256:
                             if src.decompiled and not src_other.decompiled:
-                                src.perfect_decomp = True
-                                sources.append(src)
-                            elif not src.decompiled and src_other.decompiled:
                                 src_other.perfect_decomp = True
                                 sources.append(src_other)
+                            elif not src.decompiled and src_other.decompiled:
+                                src.perfect_decomp = True
+                                sources.append(src)
 
                 for src in sources:
                     if src is None:
@@ -717,6 +717,7 @@ class SourceFunction(BaseModel):
     source: str
     argv: Optional[List[Argument]] = list()
     return_type: Optional[str] = ""
+    qualifiers: Set[str] = list()
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -732,6 +733,7 @@ class SourceFunction(BaseModel):
             name=orm.name,
             return_type = orm.return_type,
             argv=[Argument.from_literal(arg) for arg in orm.argv.split(",") if len(orm.argv) > 0],
+            qualifiers = set(orm.qualifiers.split(" "))
         )
 
     @classmethod
@@ -768,7 +770,8 @@ class SourceFunction(BaseModel):
             perfect_decomp=self.perfect_decomp,
             source=self.source,
             return_type=self.return_type,
-            argv=", ".join(str(arg) for arg in self.argv)
+            argv=", ".join(str(arg) for arg in self.argv),
+            qualifiers=" ".join(self.qualifiers)
         )
 
     def __hash__(self):

@@ -119,6 +119,18 @@ class C_Code:
         func_dec = get_child_by_type(next_n, "function_declarator")
         id_node = get_child_by_type(func_dec, 'identifier')
 
+        # Qualifiers - Mix of both storage-class specifiers and type qualifiers
+        qualifiers = list()
+
+        # C11 Standard 6.7.1 - At most one storage-class specifier may be given in the declaration specifier (except _Thread_local 
+        # can appear with static or extern) storage class specifiers: typedef, extern, static, _Thread_local, auto, register
+
+        # C11 Standard 6.7.3 - Type Qualifiers: const, restrict, volatile, _Atomic (_Atomic can not be used with a function type)
+
+        for child in func_def.children:
+            if child.type == "storage_class_specifier" or child.type == "type_qualifier":
+                qualifiers.append(str(child.text, encoding=encoding))
+
         fptr_ret = False
         if id_node is not None:
             name = str(id_node.text, encoding=encoding)
@@ -152,73 +164,69 @@ class C_Code:
             raise ValueError("Cannot find parameters")
 
         arguments = list()
-        if len(param_list.children) > 2:
-            for i in range(len(param_list.children)//2):
-                i = i*2 + 1
-                param_dec = param_list.children[i]
-                
-                # Argument Name
-                next_n = get_child_by_type(param_dec, 'pointer_declarator')
+        for param_dec in [node for node in param_list.children if node.type == "parameter_declaration"]:
+            # Argument Name
+            next_n = get_child_by_type(param_dec, 'pointer_declarator')
+            if next_n is None:
+                next_n = param_dec
+                ptr_count = 0
+            else:
+                next_n, ptr_count = unwind_ptr(next_n)
+
+            data_type_node = get_child_by_type(param_dec, "primitive_type", "sized_type_specifier", "struct_specifier", "type_identifier")
+            if data_type_node is None and param_dec.type == 'variadic_parameter':
+                arguments.append(dict(var_args=True))
+                continue
+            else:
+                data_type = str(data_type_node.text, encoding=encoding) + "*"*ptr_count
+
+            param_func_dec = get_child_by_type(next_n, 'function_declarator')
+            
+            # Three Cases for Parameters #
+            # 1. Function Pointer
+            # 2. Variadic 
+            # 3. A Normal looking one
+            if param_func_dec is not None:
+                func_sig = get_child_by_type(param_func_dec, 'parenthesized_declarator')
+                next_n = get_child_by_type(func_sig, 'pointer_declarator')
                 if next_n is None:
-                    next_n = param_dec
-                    ptr_count = 0
+                    next_n = func_sig
+                    param_ptr_count = 0
                 else:
-                    next_n, ptr_count = unwind_ptr(next_n)
-
-                data_type_node = get_child_by_type(param_dec, "primitive_type", "sized_type_specifier", "struct_specifier", "type_identifier")
-                if data_type_node is None and param_dec.type == 'variadic_parameter':
-                    arguments.append(dict(var_args=True))
-                    continue
-                else:
-                    data_type = str(data_type_node.text, encoding=encoding) + "*"*ptr_count           
-
-                param_func_dec = get_child_by_type(next_n, 'function_declarator')
+                    next_n, param_ptr_count = unwind_ptr(next_n)
                 
-                # Three Cases for Parameters #
-                # 1. Function Pointer
-                # 2. Variadic 
-                # 3. A Normal looking one
-                if param_func_dec is not None:
-                    func_sig = get_child_by_type(param_func_dec, 'parenthesized_declarator')
-                    next_n = get_child_by_type(func_sig, 'pointer_declarator')
-                    if next_n is None:
-                        next_n = func_sig
-                        param_ptr_count = 0
+                param = get_child_by_type(next_n, "identifier")
+                param_name = str(param.text, encoding=encoding)
+
+                fptr_params = str(get_child_by_type(param_func_dec, "parameter_list").text, encoding=encoding)
+                arguments.append(dict(
+                    data_type = f"{data_type}({'*'*param_ptr_count}){fptr_params}",
+                    var_name = param_name,
+                    is_func_ptr=True
+                ))
+
+            # This check is probably unneeded because of the above variadic_parameter
+            elif (param:=get_child_by_type(next_n, 'variadic_parameter')):
+                arguments.append(dict(var_args=True))
+            else:
+                param = get_child_by_type(next_n, "identifier", 'array_declarator')
+                
+                if param is None:
+                    # No name is provided. This is probably a prototype
+                    # But we will place a special case check for a parameter of just 'void' (no * i.e. not a pointer type)
+                    if data_type_node.text == b'void' and ptr_count == 0:
+                        # Skip this argument
+                        continue
                     else:
-                        next_n, param_ptr_count = unwind_ptr(next_n)
-                    
-                    param = get_child_by_type(next_n, "identifier")
-                    param_name = str(param.text, encoding=encoding)
-
-                    fptr_params = str(get_child_by_type(param_func_dec, "parameter_list").text, encoding=encoding)
-                    arguments.append(dict(
-                        data_type = f"{data_type}({'*'*param_ptr_count}){fptr_params}",
-                        var_name = param_name,
-                        is_func_ptr=True
-                    ))
-
-                # This check is probably unneeded because of the above variadic_parameter
-                elif (param:=get_child_by_type(next_n, 'variadic_parameter')):
-                    arguments.append(dict(var_args=True))
+                        # Prototype??
+                        param_name = ""
                 else:
-                    param = get_child_by_type(next_n, "identifier", 'array_declarator')
-                    
-                    if param is None:
-                        # No name is provided. This is probably a prototype
-                        # But we will place a special case check for a parameter of just 'void' (no * i.e. not a pointer type)
-                        if data_type_node.text == b'void' and ptr_count == 0:
-                            # Skip this argument
-                            continue
-                        else:
-                            # Prototype??
-                            param_name = ""
-                    else:
-                        param_name = str(param.text, encoding=encoding)
-                    
-                    arguments.append(dict(
-                        data_type=data_type,
-                        var_name=param_name
-                    ))      
+                    param_name = str(param.text, encoding=encoding)
+                
+                arguments.append(dict(
+                    data_type=data_type,
+                    var_name=param_name
+                ))      
 
         # Return Type
         ret_node = get_child_by_type(func_def, "primitive_type", "sized_type_specifier", "struct_specifier", "type_identifier")
@@ -240,6 +248,7 @@ class C_Code:
             name = name,
             source = str(get_child_by_type(func_def, 'compound_statement').text, encoding=encoding),
             argv = arguments,
-            return_type = f"{ret}{'*'*(0 if fptr_ret else ret_ptr_count)}" 
+            return_type = f"{ret}{'*'*(0 if fptr_ret else ret_ptr_count)}",
+            qualifiers = qualifiers
         )
         

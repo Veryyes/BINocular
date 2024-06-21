@@ -259,3 +259,46 @@ def test_c_func21():
 
     assert len(src.argv) == 0
     
+def test_c_func22():
+    f = b"extern\tvoid\nregsub9(char *sp,\t/* source string */\n\tchar *dp,\t/* destination string */\n\tint dlen,\n\tResub *mp,\t/* subexpression elements */\n\tint ms)\t\t/* number of elements pointed to by mp */\n{//removed}"
+    src = SourceFunction.from_code("regsub9", f)
+
+    assert src.name == "regsub9"
+    assert src.return_type == "void"
+
+    assert "extern" in src.qualifiers
+
+    assert src.argv[0].data_type == "char*"
+    assert src.argv[0].var_name == "sp"
+    assert src.argv[1].data_type == "char*" 
+    assert src.argv[1].var_name == "dp"
+    assert src.argv[2].data_type == "int"
+    assert src.argv[2].var_name == "dlen"
+    assert src.argv[3].data_type == "Resub*"
+    assert src.argv[3].var_name == "mp"
+    assert src.argv[4].data_type == "int"
+    assert src.argv[4].var_name == "ms"
+
+def test_c_func23():
+    f = b"unsigned int bar(){return 5;}"
+    src = SourceFunction.from_code("bar", f)
+
+    assert src.name == 'bar'
+    assert src.return_type == 'unsigned int'
+
+def test_c_func24():
+    f = b"volatile int bar(){}"
+    src = SourceFunction.from_code("bar", f)
+
+    assert src.name == 'bar'
+    assert src.return_type == 'int'
+
+    assert "volatile" in src.qualifiers
+
+def test_c_func25():
+    f = b"extern const volatile int foo(){}"
+    src = SourceFunction.from_code("foo", f)
+    assert src.name == 'foo'
+    assert src.return_type == 'int'
+
+    assert len(set(["extern", "const", "volatile"]) ^ src.qualifiers) == 0
