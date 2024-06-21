@@ -247,3 +247,15 @@ def test_c_func20():
     assert src.argv[0].var_name == 'callback'
     assert src.argv[1].data_type == 'struct socket*'
     assert src.argv[1].var_name == 's'
+
+def test_c_func21():
+    # function with no parameters
+    f = b"float foo(){return 3.14;}"
+    src = SourceFunction.from_code("foo", f)
+
+    assert src.name == 'foo'
+    assert src.source == '{return 3.14;}'
+    assert src.return_type == 'float'
+
+    assert len(src.argv) == 0
+    
