@@ -23,19 +23,21 @@ from git import Repo
 import git
 
 from .disassembler import Disassembler
-from .primitives import Section,Instruction, IR, Argument, Branch, Reference, Variable
+from .primitives import Section, Instruction, IR, Argument, Branch, Reference, Variable
 from .consts import Endian, IL, BranchType, RefType
 from .utils import run_proc
 
 logger = logging.getLogger(__name__)
-coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+coloredlogs.install(
+    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+
 
 class Ghidra(Disassembler):
     _DONT_SHUTDOWN_JVM = False
-    
+
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
     GITHUB_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
-    
+
     @staticmethod
     def DEFAULT_INSTALL():
         '''Default Install Location for Ghidra (Within Python Package Installation)'''
@@ -59,7 +61,7 @@ class Ghidra(Disassembler):
             versions.append(ver.strip())
 
         return versions
-        
+
     @classmethod
     def _install_prebuilt(cls, version, install_dir):
         # Ask Github API for Ghidra Release versions and the
@@ -102,11 +104,13 @@ class Ghidra(Disassembler):
 
         # dependency check
         if shutil.which('java') is None:
-            logger.critical("Can't find java. Is JDK 21 installed? Download here: https://adoptium.net/temurin/releases/")
+            logger.critical(
+                "Can't find java. Is JDK 21 installed? Download here: https://adoptium.net/temurin/releases/")
             exit(1)
 
         if shutil.which('gradle') is None:
-            logger.critical("Can't find gradle. Gradle 8.5+ required. Download here: https://gradle.org/releases/")
+            logger.critical(
+                "Can't find gradle. Gradle 8.5+ required. Download here: https://gradle.org/releases/")
             exit(1)
 
         logger.info(f"Cloning Ghidra {version} to: {install_dir}")
@@ -140,18 +144,18 @@ class Ghidra(Disassembler):
         return os.path.join(dist, "_".join(os.path.basename(zip_file).split('_')[:3]))
 
     @classmethod
-    def install(cls, version:str=None, install_dir=None, build=False) -> str:
+    def install(cls, version: str = None, install_dir=None, build=False) -> str:
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         if install_dir is None:
             install_dir = Ghidra.DEFAULT_INSTALL()
-        
+
         os.makedirs(install_dir, exist_ok=True)
 
         if build:
             ghidra_home = Ghidra._build(version, install_dir)
         else:
             ghidra_home = Ghidra._install_prebuilt(version, install_dir)
-        
+
         logger.info("Ghidra Install Completed")
         assert os.path.exists(ghidra_home)
 
@@ -162,11 +166,12 @@ class Ghidra(Disassembler):
                 fpath = os.path.join(root, fname)
                 os.chmod(fpath, 0o775)
 
-        try:            
+        try:
             launcher = pyhidra.HeadlessPyhidraLauncher(install_dir=ghidra_home)
             launcher.start()
         except ValueError:
-            logger.warn(f"Unable to install Pyhidra Plugin. Minimum Ghidra version required is 10.3.\nTL;DR Ghidra {version} is installed, but won't be useable for Binocular")
+            logger.warn(
+                f"Unable to install Pyhidra Plugin. Minimum Ghidra version required is 10.3.\nTL;DR Ghidra {version} is installed, but won't be useable for Binocular")
 
         return ghidra_home
 
@@ -174,16 +179,17 @@ class Ghidra(Disassembler):
     def is_installed(cls, install_dir=None) -> bool:
         '''Returns Boolean on whether or not the dissassembler is installed'''
         os.makedirs(Ghidra.DEFAULT_INSTALL(), exist_ok=True)
-        
+
         if install_dir is None:
             if len(os.listdir(Ghidra.DEFAULT_INSTALL())) == 0:
                 return False
 
-            install_dir = os.path.join(Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
-        
+            install_dir = os.path.join(
+                Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
+
         return os.path.exists(os.path.join(install_dir, "support", "launch.sh"))
 
-    def __init__(self, verbose=True, project_path:str=None, home=None, save_on_close=False, jvm_args:Iterable[str]=None):
+    def __init__(self, verbose=True, project_path: str = None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
 
         self.project = None
@@ -199,7 +205,8 @@ class Ghidra(Disassembler):
         self.base_project_path = project_path
 
         if home is None:
-            self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
+            self.ghidra_home = os.path.join(
+                Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
         else:
             self.ghidra_home = home
 
@@ -208,7 +215,8 @@ class Ghidra(Disassembler):
 
     def open(self):
         if not PyhidraLauncher.has_launched():
-            launcher = HeadlessPyhidraLauncher(install_dir=self.ghidra_home, verbose=False)
+            launcher = HeadlessPyhidraLauncher(
+                install_dir=self.ghidra_home, verbose=False)
             launcher.add_vmargs(*self.jvm_args)
             launcher.start()
         return self
@@ -219,9 +227,9 @@ class Ghidra(Disassembler):
 
         if self.decomp is not None:
             self.decomp.closeProgram()
-        
+
         if self.project is not None:
-            if self.save_on_close:        
+            if self.save_on_close:
                 self.project.save(self.program)
             self.project.close()
 
@@ -234,21 +242,21 @@ class Ghidra(Disassembler):
         GhidraScriptUtil.releaseBundleHostReference()
         if self.decomp is not None:
             self.decomp.closeProgram()
-        if self.save_on_close:        
+        if self.save_on_close:
             self.project.save(self.program)
 
         self.project.close()
         self.project = None
         self.program = None
         self.flat_api = None
-        
+
     def get_sections(self) -> Iterable[Section]:
         '''
         Returns a list of the sections within the binary.
         Currently only supports sections within an ELF file.
         '''
         sections = list()
-    
+
         blocks = self.program.getMemory().getBlocks()
         for block in blocks:
             sections.append(Section(
@@ -268,7 +276,7 @@ class Ghidra(Disassembler):
 
         return sections
 
-    def _mk_addr(self, offset:int):
+    def _mk_addr(self, offset: int):
         return self.program.getAddressFactory().getDefaultAddressSpace().getAddress(offset)
 
     def analyze(self, path) -> bool:
@@ -282,9 +290,10 @@ class Ghidra(Disassembler):
         from ghidra.app.decompiler import DecompInterface, DecompileOptions
         from ghidra.util.task import ConsoleTaskMonitor
         from ghidra.program.model.block import BasicBlockModel
-        
+
         with open(path, 'rb') as f:
-            project_path = os.path.join(self.base_project_path, hashlib.md5(f.read()).hexdigest())
+            project_path = os.path.join(
+                self.base_project_path, hashlib.md5(f.read()).hexdigest())
 
         self.project_location = os.path.dirname(project_path)
         self.project_name = os.path.basename(project_path)
@@ -337,7 +346,7 @@ class Ghidra(Disassembler):
                     return ep_addr.getOffset()
 
         return None
-    
+
     def get_architecture(self) -> str:
         '''
         Returns the architecture of the binary.
@@ -345,7 +354,7 @@ class Ghidra(Disassembler):
         https://github.com/angr/archinfo
         '''
         return str(self.lang_description.getProcessor())
-    
+
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
         endian = str(self.lang_description.getEndian())
@@ -362,8 +371,8 @@ class Ghidra(Disassembler):
     def get_base_address(self) -> int:
         '''Returns the base address the binary is based at'''
         return self.program.getImageBase().getOffset()
-    
-    def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
+
+    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
         from ghidra.program.util import DefinedDataIterator
 
@@ -385,27 +394,29 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
-        for f in self.fm.getFunctions(True):            
+        for f in self.fm.getFunctions(True):
             yield f
 
-    def get_func_addr(self, func_ctxt:Any) -> int:
+    def get_func_addr(self, func_ctxt: Any) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
         return func_ctxt.getEntryPoint().getOffset()
 
-    def get_func_name(self, addr:int, func_ctxt:Any) -> str:
+    def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
         return func_ctxt.getName()
 
     @lru_cache
-    def _decompile(self, func_ctxt:Any):
-        '''Return DecompileResult object. lru_cache'd because it's a little expensive'''        
-        res = self.decomp.decompileFunction(func_ctxt, self.decomp_timeout, self.monitor)
+    def _decompile(self, func_ctxt: Any):
+        '''Return DecompileResult object. lru_cache'd because it's a little expensive'''
+        res = self.decomp.decompileFunction(
+            func_ctxt, self.decomp_timeout, self.monitor)
         if not res.decompileCompleted():
-            logger.warn(f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
-            
+            logger.warn(
+                f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
+
         return res
-    
-    def get_func_args(self, addr:int, func_ctxt:Any) -> List[Argument]:
+
+    def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
         decomp_res = self._decompile(func_ctxt)
         high_func = decomp_res.getHighFunction()
@@ -416,17 +427,17 @@ class Ghidra(Disassembler):
 
         args = [
             Argument(
-                data_type = str(proto.getParam(i).getDataType()),
-                var_name = str(proto.getParam(i).getName())
+                data_type=str(proto.getParam(i).getDataType()),
+                var_name=str(proto.getParam(i).getName())
             ) for i in range(proto.getNumParams())
         ]
-        
+
         if func_ctxt.hasVarArgs():
             args.append(Argument(data_type=None, var_name=None, var_args=True))
 
         return args
-    
-    def get_func_return_type(self, addr:int, func_ctxt:Any) -> int:
+
+    def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
         decomp_res = self._decompile(func_ctxt)
         high_func = decomp_res.getHighFunction()
@@ -436,12 +447,12 @@ class Ghidra(Disassembler):
 
         return str(proto.getReturnType())
 
-    def get_func_stack_frame_size(self, addr:int, func_ctxt:Any) -> int:
+    def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
         sf = func_ctxt.getStackFrame()
         return sf.getFrameSize()
 
-    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+    def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
         vars = list()
         for var in func_ctxt.getLocalVariables():
@@ -456,20 +467,20 @@ class Ghidra(Disassembler):
             vars.append(v)
         return vars
 
-    def is_func_thunk(self, addr:int, func_ctxt:Any) -> bool:
+    def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
         return func_ctxt.isThunk()
-    
-    def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
+
+    def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
         decomp_res = self._decompile(func_ctxt)
         dfunc = decomp_res.getDecompiledFunction()
         if dfunc is None:
             return None
-            
+
         return dfunc.getC()
-    
-    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+
+    def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
         refs = self.ref_m.getReferencesTo(self._mk_addr(addr))
         for ref in refs:
             if ref.getReferenceType().isCall():
@@ -477,8 +488,8 @@ class Ghidra(Disassembler):
                 caller = self.fm.getFunctionContaining(call_addr)
                 if caller is not None:
                     yield caller.getEntryPoint().getOffset()
-        
-    def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+
+    def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
         for addr in func_ctxt.getBody().getAddresses(True):
             refs = self.ref_m.getReferencesFrom(addr)
             for ref in refs:
@@ -494,62 +505,62 @@ class Ghidra(Disassembler):
             return RefType.READ
         if type.isWrite():
             return RefType.WRITE
-        
+
         return RefType.UNKNOWN
 
-    def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
+    def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
         for addr in func_ctxt.getBody().getAddresses(True):
             from_refs = self.ref_m.getReferencesFrom(addr)
             for ref in from_refs:
                 ref_type = ref.getReferenceType()
                 yield Reference(
-                    from_ = ref.getFromAddress().getOffset(),
-                    to = ref.getToAddress().getOffset(),
-                    type = self._parse_ref_type(ref_type)
+                    from_=ref.getFromAddress().getOffset(),
+                    to=ref.getToAddress().getOffset(),
+                    type=self._parse_ref_type(ref_type)
                 )
 
             to_refs = self.ref_m.getReferencesTo(addr)
             for ref in to_refs:
                 ref_type = ref.getReferenceType()
                 yield Reference(
-                    from_ = ref.getFromAddress().getOffset(),
-                    to = ref.getToAddress().getOffset(),
-                    type = self._parse_ref_type(ref_type)
+                    from_=ref.getFromAddress().getOffset(),
+                    to=ref.getToAddress().getOffset(),
+                    type=self._parse_ref_type(ref_type)
                 )
 
-    def get_func_bb_iterator(self, addr:int, func_ctxt:Any) -> Iterable[Any]:
+    def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
         '''
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
         needed to construct a `BasicBlock` object for all basic blocks in the function based on function information returned from `get_func_iterator()`.
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
-        blocks = self.bb_model.getCodeBlocksContaining(func_ctxt.getBody(), self.monitor)
+        blocks = self.bb_model.getCodeBlocksContaining(
+            func_ctxt.getBody(), self.monitor)
         history = set()
-        
-        while(blocks.hasNext()):
+
+        while (blocks.hasNext()):
             bb = blocks.next()
             bb_addr = bb.getFirstStartAddress().getOffset()
-            
+
             if bb_addr in history:
                 continue
 
             history.add(bb_addr)
             yield bb
-        
 
-    def get_bb_addr(self, bb_ctxt:Any, func_ctxt:Any) -> int:
+    def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
         '''
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
         return bb_ctxt.getFirstStartAddress().getOffset()
 
-    def get_next_bbs(self, bb_addr:int, bb_ctxt:Any, func_addr:int, func_ctxt:Any) -> Iterable[Branch]:
+    def get_next_bbs(self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any) -> Iterable[Branch]:
         '''
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
         dest_refs = bb_ctxt.getDestinations(self.monitor)
-        while(dest_refs.hasNext()):
+        while (dest_refs.hasNext()):
             dest = dest_refs.next()
             if not self.fm.getFunctionAt(dest.getDestinationAddress()):
                 dest_addr = dest.getDestinationAddress().getOffset()
@@ -563,21 +574,22 @@ class Ghidra(Disassembler):
                 elif flow_type.isComputed():
                     yield Branch(btype=BranchType.IndirectBranch, target=None)
 
-
-    def get_bb_instructions(self, bb_addr:int, bb_ctxt:Any, func_ctxt:Any) -> List[Tuple(bytes, str)]:
+    def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple(bytes, str)]:
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
         instr = list()
 
-        curr_instr = self.listing.getInstructionAt(bb_ctxt.getFirstStartAddress())
+        curr_instr = self.listing.getInstructionAt(
+            bb_ctxt.getFirstStartAddress())
         while (curr_instr is not None and bb_ctxt.contains(curr_instr.getAddress())):
-            instr.append((bytes(curr_instr.getBytes()), curr_instr.getMnemonicString()))
+            instr.append((bytes(curr_instr.getBytes()),
+                         curr_instr.getMnemonicString()))
             curr_instr = curr_instr.getNext()
 
         return instr
-    
-    def get_ir_from_instruction(self, instr_addr:int, instr:Instruction) -> Optional[IR]:
+
+    def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> Optional[IR]:
         '''
         Returns the Intermediate Representation data based on the instruction given
         '''
@@ -585,7 +597,7 @@ class Ghidra(Disassembler):
         pcodes = [str(p) for p in curr_instr.getPcode()]
         return IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
 
-    def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
+    def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
         from ghidra.program.model.listing import CodeUnit
         curr_instr = self.listing.getInstructionAt(self._mk_addr(instr_addr))

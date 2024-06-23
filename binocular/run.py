@@ -12,17 +12,22 @@ from binocular import Backend, Ghidra, Rizin
 
 app = typer.Typer()
 
+
 class DisassemblerChoice(Enum):
     rizin = "rizin"
     ghidra = "ghidra"
+
 
 @app.command()
 def parse(
     path: Annotated[Path, typer.Argument(help="Path to Binary")],
     disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
-    uri: Annotated[str, typer.Option('-u', '--uri', help="SQL database URI")] = None,
-    quiet: Annotated[bool, typer.Option('-q', '--quiet', help="Don't print anything")] = False,
-    interactive: Annotated[bool, typer.Option('-i', '--ipython', help="Launch an IPython shell after loading")] = False
+    uri: Annotated[str, typer.Option(
+        '-u', '--uri', help="SQL database URI")] = None,
+    quiet: Annotated[bool, typer.Option(
+        '-q', '--quiet', help="Don't print anything")] = False,
+    interactive: Annotated[bool, typer.Option(
+        '-i', '--ipython', help="Launch an IPython shell after loading")] = False
 ):
     disasm_type = None
     if disassm == DisassemblerChoice.rizin:
@@ -64,12 +69,16 @@ def parse(
         if interactive:
             IPython.embed()
 
+
 @app.command()
 def install(
     disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
-    version: Annotated[str, typer.Option('-v', '--version', help="Version Number or Commit Hash (if applicable) to download, (build), and install ")] = None,
-    path: Annotated[str, typer.Option('-p', '--path', help="Path to install disassembler to")] = None,
-    l: Annotated[bool, typer.Option('-l', '--list', help="List available verions to download and install")] = False,
+    version: Annotated[str, typer.Option(
+        '-v', '--version', help="Version Number or Commit Hash (if applicable) to download, (build), and install ")] = None,
+    path: Annotated[str, typer.Option(
+        '-p', '--path', help="Path to install disassembler to")] = None,
+    l: Annotated[bool, typer.Option(
+        '-l', '--list', help="List available verions to download and install")] = False,
 ):
     disasm_type = None
     if disassm == DisassemblerChoice.rizin:
@@ -91,14 +100,13 @@ def install(
     disasm_type.install(
         version=version,
         install_dir=path,
-        build = build
+        build=build
     )
-
-    
 
 
 def main():
     app()
+
 
 if __name__ == "__main__":
     main()

@@ -27,7 +27,9 @@ import rzpipe
 import coloredlogs
 
 logger = logging.getLogger(__name__)
-coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+coloredlogs.install(
+    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+
 
 class Rizin(Disassembler):
 
@@ -61,13 +63,15 @@ class Rizin(Disassembler):
             return os.path.exists(pre_built_loc) or os.path.exists(build_loc)
 
         sys_install = shutil.which('rizin') is not None
-        local_install_pre_built = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL(), "bin"))
-        local_install_build = os.path.exists(os.path.join(Rizin.DEFAULT_INSTALL(), "build", "binrz", "rizin"))
-        
+        local_install_pre_built = os.path.exists(
+            os.path.join(Rizin.DEFAULT_INSTALL(), "bin"))
+        local_install_build = os.path.exists(os.path.join(
+            Rizin.DEFAULT_INSTALL(), "build", "binrz", "rizin"))
+
         return sys_install or local_install_pre_built or local_install_build
 
     @classmethod
-    def install(cls, version:str=None, install_dir=None, build=False) -> str:
+    def install(cls, version: str = None, install_dir=None, build=False) -> str:
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         logger.info("Installing Rizin")
 
@@ -107,20 +111,20 @@ class Rizin(Disassembler):
             links = OrderedDict()
             for release in release_data:
                 ver = release['name'].rsplit(" ", 1)[1]
-                
+
                 for asset in release['assets']:
                     # Only supporting linux x86 as of now
                     if 'static-x86_64' in asset['name']:
                         dl_link = asset['browser_download_url']
                         links[ver] = dl_link
                         break
-                           
+
             if version is None:
                 version = next(iter(links.keys()))
             elif version not in links:
                 logger.critical(f"Rizin version {version} not found")
                 raise Exception(f"Rizin version {version} not found")
-                
+
             dl_link = links[version]
             logger.info(f"Installing Rizin {version} to {install_dir}")
             logger.info(f"Downloading {dl_link}...")
@@ -130,12 +134,11 @@ class Rizin(Disassembler):
                 with lzma.open(fp) as xz:
                     with tarfile.open(fileobj=xz) as tar:
                         tar.extractall(install_dir)
-            
+
         logger.info("Rizin Install Completed")
         return install_dir
 
-
-    def __init__(self, verbose=True, home:str=None) -> None:
+    def __init__(self, verbose=True, home: str = None) -> None:
         super().__init__(verbose=verbose)
         self.rizin_home = home
         self._pipe = None
@@ -186,7 +189,8 @@ class Rizin(Disassembler):
                 self.rizin_home = Rizin.DEFAULT_INSTALL()
 
             pre_built_loc = os.path.join(self.rizin_home, "bin")
-            build_loc = os.path.join(self.rizin_home, "build", "binrz", "rizin")
+            build_loc = os.path.join(
+                self.rizin_home, "build", "binrz", "rizin")
             if os.path.exists(pre_built_loc):
                 self._pipe = rzpipe.open(path, rizin_home=pre_built_loc)
             elif os.path.exists(build_loc):
@@ -196,7 +200,7 @@ class Rizin(Disassembler):
 
         self._pipe.cmd('aaaa')
         self._bin_info = self._pipe.cmdj('ij')['bin']
-        
+
         return True, None
 
     def _post_normalize(self):
@@ -204,11 +208,10 @@ class Rizin(Disassembler):
         del self._calls_cache
         del self._thunk_dict
 
-
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
         return self._pipe.cmdj('iej')[0]['vaddr']
-    
+
     def get_architecture(self) -> str:
         '''
         Returns the architecture of the binary.
@@ -216,14 +219,14 @@ class Rizin(Disassembler):
         https://github.com/angr/archinfo
         '''
         return self._bin_info['arch']
-    
+
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
         if self._bin_info['endian'] == "LE":
             return Endian.LITTLE
         elif self._bin_info['endian'] == "BE":
             return Endian.BIG
-        
+
         return Endian.OTHER
 
     def get_bitness(self) -> int:
@@ -233,8 +236,8 @@ class Rizin(Disassembler):
     def get_base_address(self) -> int:
         '''Returns the base address the binary is based at'''
         return int(self._pipe.cmd("echo $B"), 16)
-    
-    def get_strings(self, binary_io:IO, file_size:int) -> Iterable[str]:
+
+    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
         return [s['string'] for s in self._pipe.cmdj('izj')]
 
@@ -252,11 +255,11 @@ class Rizin(Disassembler):
         for f in self._pipe.cmdj("aflj"):
             yield f
 
-    def get_func_addr(self, func_ctxt:Any) -> int:
+    def get_func_addr(self, func_ctxt: Any) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
         return func_ctxt['offset']
 
-    def get_func_name(self, addr:int, func_ctxt:Any) -> str:
+    def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj('afsj')
@@ -272,9 +275,9 @@ class Rizin(Disassembler):
             name = name[len("imp."):]
             self._thunk_dict[addr] = True
 
-        return name         
-    
-    def get_func_args(self, addr:int, func_ctxt:Any) -> List[Argument]:
+        return name
+
+    def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj('afsj')
@@ -285,12 +288,12 @@ class Rizin(Disassembler):
             ) for arg in signature['args'] if arg.get('type', None) and arg.get('name', None)
         ]
 
-    def get_func_callers(self, addr:int, func_ctxt:Any) -> Iterable[int]:        
+    def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
         '''Return the address to functions that call func_ctxt'''
         for call_addr in self._caller_cache[addr]:
             yield call_addr
 
-    def get_func_callees(self, addr:int, func_ctxt:Any) -> Iterable[int]:
+    def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
         '''Return the address to functions that are called in func_ctxt'''
         for callee_addr in self._calls_cache[addr]:
             yield callee_addr
@@ -305,7 +308,7 @@ class Rizin(Disassembler):
 
         return RefType.UNKNOWN
 
-    def get_func_xrefs(self, addr:int, func_ctxt:Any) -> Iterable[Reference]:
+    def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
         self._pipe.cmd(f"s {addr}")
         xref_data = self._pipe.cmdj("afxj")
         for xref in xref_data:
@@ -318,21 +321,21 @@ class Rizin(Disassembler):
                 from_=xref['from'],
                 type=self._parse_xref_type(xref['type'])
             )
-    
-    def get_func_return_type(self, addr:int, func_ctxt:Any) -> int:
+
+    def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj('afsj')
 
         return signature['ret']
 
-    def get_func_stack_frame_size(self, addr:int, func_ctxt:Any) -> int:
+    def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
         self._pipe.cmd(f"s {addr}")
 
         return self._pipe.cmdj('afij')[0]['stackframe']
 
-    def get_func_vars(self, addr:int, func_ctxt:Any) -> Iterable[Variable]:
+    def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
         self._pipe.cmd(f"s {addr}")
         vars = list()
@@ -355,16 +358,15 @@ class Rizin(Disassembler):
 
         return vars
 
-
-    def is_func_thunk(self, addr:int, func_ctxt:Any) -> bool:
+    def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
         return self._thunk_dict.get(addr, False)
-    
-    def get_func_decomp(self, addr:int, func_ctxt:Any) -> Optional[str]:
+
+    def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
         return None
-    
-    def get_func_bb_iterator(self, addr:int, func_ctxt:Any) -> Iterable[Any]:
+
+    def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
         '''
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
         needed to construct a `BasicBlock` object for all basic blocks in the function based on function information returned from `get_func_iterator()`.
@@ -375,27 +377,30 @@ class Rizin(Disassembler):
         for bb in self._pipe.cmdj('afbj'):
             yield bb
 
-    def get_bb_addr(self, bb_ctxt:Any, func_ctxt:Any) -> int:
+    def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
         '''
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
         return bb_ctxt['addr']
 
-    def get_next_bbs(self, bb_addr:int, bb_ctxt:Any, func_addr:int, func_ctxt:Any) -> Iterable[Branch]:
+    def get_next_bbs(self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any) -> Iterable[Branch]:
         '''
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
         branches = list()
         if bb_ctxt.get('fail', None) is not None:
-            branches.append(Branch(btype=BranchType.FalseBranch, target=bb_ctxt['fail']))
+            branches.append(
+                Branch(btype=BranchType.FalseBranch, target=bb_ctxt['fail']))
             if bb_ctxt.get('jump', None) is not None:
-                branches.append(Branch(btype=BranchType.TrueBranch, target=bb_ctxt['jump']))
+                branches.append(
+                    Branch(btype=BranchType.TrueBranch, target=bb_ctxt['jump']))
         elif bb_ctxt.get('jump', None) is not None:
-            branches.append(Branch(btype=BranchType.UnconditionalBranch, target=bb_ctxt['jump']))
+            branches.append(
+                Branch(btype=BranchType.UnconditionalBranch, target=bb_ctxt['jump']))
 
         return branches
 
-    def get_bb_instructions(self, bb_addr:int, bb_ctxt:Any, func_ctxt:Any) -> List[Tuple(bytes, str)]:
+    def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple(bytes, str)]:
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
@@ -408,12 +413,12 @@ class Rizin(Disassembler):
             self._pipe.cmd(f"s {addr}")
             instr_data = self._pipe.cmdj(f"pdj 1")[0]
 
-            instrs.append((bytes.fromhex(instr_data['bytes']), instr_data['disasm']))
-            
+            instrs.append(
+                (bytes.fromhex(instr_data['bytes']), instr_data['disasm']))
+
         return instrs
 
-    
-    def get_ir_from_instruction(self, instr_addr:int, instr:Instruction) -> Optional[IR]:
+    def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> Optional[IR]:
         '''
         Returns the Intermediate Representation data based on the instruction given
         '''
@@ -422,10 +427,10 @@ class Rizin(Disassembler):
         ir = instr_data.get('esil', None)
         if ir is not None and len(ir) > 0:
             return IR(IL.ESIL, ir)
-            
+
         return None
 
-    def get_instruction_comment(self, instr_addr:int) -> Optional[str]:
+    def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
         self._pipe.cmd(f"s {instr_addr}")
         instr_data = self._pipe.cmdj(f"pdj 1")[0]
