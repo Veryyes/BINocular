@@ -4,6 +4,7 @@
 
 # BINocular - Common Binary Analysis Framework
 
+![Static Badge](https://img.shields.io/badge/Version-1.0-navy) 
 ![Static Badge](https://img.shields.io/badge/license-GPLv3-green) 
 ![Static Badge](https://img.shields.io/badge/Python-3.10-blue)
 
