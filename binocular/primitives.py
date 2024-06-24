@@ -40,6 +40,10 @@ def bytes_validator(x:Union[bytes,bytearray,str]) -> bytes:
 Bytes = Annotated[bytes, PlainValidator(bytes_validator), PlainSerializer(lambda x: x.hex())]
 
 class Backend:
+    '''
+    Wrapper for a sqlachemy.Engine
+    '''
+
     engine: Engine = None
 
     @classmethod
@@ -64,8 +68,14 @@ class NoDBException(Exception):
 
 @dataclass
 class Branch:
+    '''
+    Describes a branch in control flow
+    '''
+
     btype: BranchType
+    '''Type of Jump'''
     target: Optional[int]
+    '''Address to Jump to'''
 
     def __hash__(self):
         return hash((self.btype, self.target))
@@ -73,11 +83,15 @@ class Branch:
 
 @dataclass
 class IR:
+    '''
+    Represents a series of intermediate instruction(s) that correspond to a single assembly instruction
+    '''
     lang_name: IL
     data: str
 
 
 class Variable(BaseModel):
+    '''Represents a Variable recovered from compiled code'''
     data_type: str
     name: str
     is_register: bool
@@ -231,7 +245,7 @@ class Instruction(NativeCode):
         return InstructionORM
 
     @classmethod
-    def from_orm(cls, orm):
+    def from_orm(cls, orm, ir_type:Optional[IL]=None):
         instruction = cls(
             endianness=orm.endianness,
             architecture=orm.architecture,
@@ -243,8 +257,17 @@ class Instruction(NativeCode):
         )
 
         if len(orm.ir) > 0:
-            # TODO for now, just pick the first one
-            ir_data = orm.ir[0]
+            # If multiple IRs for this instruction has been loaded
+            # into the database (i.e. we ran more than one diassembler)
+            # then orm.ir would have more than one entry
+            # We will just pick one arbitrarily unless, specified
+            if ir_type is None:
+                ir_data = orm.ir[0]
+            else:
+                for ir_data in orm.ir:
+                    if ir_data.lang == ir_type:
+                        break
+                
             ir = IR(
                 lang_name=ir_data.lang,
                 data=ir_data.data
@@ -1161,7 +1184,6 @@ class Binary(NativeCode):
 
         if self._backend.db is not None:
             with Session(self._backend.db) as s:
-                # TODO check if binary is even in db first
                 # Weirdness w/ query building & cached property
                 # warm cache up before building query or else it breaks
                 self.sha256
