@@ -31,7 +31,7 @@ disassemblers and provides:
 ### [Rizin](https://rizin.re/)
 
 ## Installation
-Install the python package using `setup.py`
+`pip install BINocular`
 
 ## Example CLI Usage
 **List Avaliable Ghidra Versions to Install**
