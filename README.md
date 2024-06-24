@@ -1,3 +1,4 @@
+![BINocular Logo](./imgs/BINocular-logo-background.svg)
 # BINocular - Common Binary Analysis Framework
 
 BINocular is an python package for static analysis of compiled binaries 
@@ -72,19 +73,104 @@ Inserting to DB
 
 ## Example Python Usage
 
-```python
-from sqlalchemy.orm import Session
-from binocular import Ghidra, Backend, FunctionSource
+### Installing Ghidra at commit `dee48e9`
 
-Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
+This makes the assumption you already have all the build dependencies to build Ghidra (same goes for other disassemblers).
+```python
+from binocular import Ghidra
 
 install_dir = "./test_install"
 if not Ghidra.is_installed(install_dir=install_dir):
     # Install Ghidra @ commit dee48e9 if Ghidra isn't installed already
     # This make take a while since it does build Ghidra from scratch
     Ghidra.install(version='dee48e9', install_dir=install_dir, build=True)
+```
 
-with Ghidra(home=install_dir) as g:
+### Serializing Objects
+All the basic primitives such as `Instruction`, `Basic Block`, and `NativeFunction` are all built on top of [Pydantic](https://docs.pydantic.dev/latest/) with python type hinting. This means we get all the benefits of pydantic like type validation and json serialization.
+
+
+```python
+from binocular import Ghidra
+
+with Ghidra() as g:
+    g.load("./test/example")
+    b = g.binary
+    
+    f = g.function_sym("fib")
+    bb = list(f.basic_blocks)[0]
+    print(bb.model_dump_json())
+```
+
+**Output (After piped to jq)**
+```json
+{
+  "endianness": 0,
+  "architecture": "x86",
+  "bitness": 64,
+  "address": 1053275,
+  "pie": 3,
+  "instructions": [
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053275,
+      "data": "837dec01",
+      "asm": "CMP",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x4400, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0xdb00, 4) LOAD (const, 0x1b1, 4) , (unique, 0x4400, 8);(unique, 0x27600, 4) COPY (unique, 0xdb00, 4);(register, 0x200, 1) INT_LESS (unique, 0x27600, 4) , (const, 0x1, 4);(register, 0x20b, 1) INT_SBORROW (unique, 0x27600, 4) , (const, 0x1, 4);(unique, 0x27700, 4) INT_SUB (unique, 0x27600, 4) , (const, 0x1, 4);(register, 0x207, 1) INT_SLESS (unique, 0x27700, 4) , (const, 0x0, 4);(register, 0x206, 1) INT_EQUAL (unique, 0x27700, 4) , (const, 0x0, 4);(unique, 0x15080, 4) INT_AND (unique, 0x27700, 4) , (const, 0xff, 4);(unique, 0x15100, 1) POPCOUNT (unique, 0x15080, 4);(unique, 0x15180, 1) INT_AND (unique, 0x15100, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x15180, 1) , (const, 0x0, 1)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053279,
+      "data": "7507",
+      "asm": "JNZ",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0xe480, 1) BOOL_NEGATE (register, 0x206, 1); ---  CBRANCH (ram, 0x101268, 8) , (unique, 0xe480, 1)"
+      }
+    }
+  ],
+  "branches": [
+    {
+      "btype": 1,
+      "target": 1053288
+    },
+    {
+      "btype": 1,
+      "target": 1053281
+    }
+  ],
+  "is_prologue": false,
+  "is_epilogue": false,
+  "xrefs": [
+    {
+      "from_": 1053279,
+      "to": 1053288,
+      "type": 1
+    }
+  ]
+}
+```
+
+### Loading a Binary In and Upload to a Database
+Each primitive has a corresponding [SQLAlchemy](https://www.sqlalchemy.org/) ORM class that is suffixed with "ORM". (e.g. `NativeFunctionORM`, `BinaryORM`). 
+
+```python
+from sqlalchemy.orm import Session
+from binocular import Ghidra, Backend, FunctionSource
+
+Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
+
+# If no install_dir parameter is specified, it will use the baked in default path (inside the python package itself)
+with Ghidra() as g:
     g.load("./test/example")
     b = g.binary
     
@@ -97,13 +183,34 @@ with Ghidra(home=install_dir) as g:
         if src is not None:
             f.sources.add(src)
 
-        # If f calls itself (i.e. f is recursive) then print the function name
-        if f in f.calls:
-            print(f.names[0])
-
     # Load the entire binary to the database set in line 4
     with Session(Backend.engine) as s:
         b.db_add(s)
         s.commit()
 
+```
+
+### Querying Data from a Database
+This is an example of querying a binary by name. This is all SQL/SQLAlchemy so make whatever queries you want.
+
+Use the `.from_orm()` function to lift the ORM object back to a Pydantic BaseModel object
+```python
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from binocular import Backend, Binary
+from binocular.db import BinaryORM, NameORM
+
+Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
+
+with Session(Backend.engine) as session:
+    # Select a binary whoes file name has been "example"
+    binary = session.execute(
+        select(BinaryORM).join(NameORM, BinaryORM.names).where(NameORM.name == 'example')
+    ).all()
+    binary = [b[0] for b in binary][0]
+
+    # Convert the BinaryORM object to a Binary Object
+    # and get all its functions
+    funcs = Binary.from_orm(binary).functions
+    print(f"example has {len(funcs)} functions")
 ```
