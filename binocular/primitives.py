@@ -365,7 +365,7 @@ class BasicBlock(NativeCode):
         return BasicBlock.BasicBlockIterator(self)
 
     def __hash__(self):
-        return hash(self.bytes)
+        return hash(bytes(self))
 
     def __len__(self):
         if self._size_bytes is None:
@@ -376,7 +376,7 @@ class BasicBlock(NativeCode):
         if isinstance(x, Instruction):
             return x in self.instructions
         elif isinstance(x, bytes):
-            return x in self.bytes
+            return x in bytes(self)
         elif isinstance(x, int):
             return x >= self.address and x <= (self.address + len(self))
         raise TypeError
@@ -520,7 +520,7 @@ class NativeFunction(NativeCode):
         if self._binary is not None:
             start = bbs[0].address - self._binary.base_addr
             end = bbs[-1].address + len(bbs[-1]) - self._binary.base_addr
-            return self._binary.bytes()[start:end]
+            return bytes(self._binary)[start:end]
 
         return None
 
@@ -610,7 +610,7 @@ class NativeFunction(NativeCode):
     @cached_property
     def sha256(self) -> str:
         bbs = sorted(self.basic_blocks, key=lambda b: b.address)
-        func_bytes = b"".join([bb.bytes for bb in bbs])
+        func_bytes = b"".join([bytes(bb) for bb in bbs])
         return hashlib.sha256(func_bytes).hexdigest()
 
     def disasm(self) -> str:
