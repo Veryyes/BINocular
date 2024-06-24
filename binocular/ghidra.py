@@ -148,7 +148,12 @@ class Ghidra(Disassembler):
 
     @classmethod
     def install(cls, version: str = None, install_dir=None, build=False) -> str:
-        '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
+        '''
+        Installs the disassembler to a user specified directory or within the python module if none is specified
+        :param version: Release Version Number or Commit Hash
+        :param install_dir: the directory to install Ghidra to
+        :param build: True if version is a Commit Hash.
+        '''
         if install_dir is None:
             install_dir = Ghidra.DEFAULT_INSTALL()
 
@@ -184,13 +189,17 @@ class Ghidra(Disassembler):
         os.makedirs(Ghidra.DEFAULT_INSTALL(), exist_ok=True)
 
         if install_dir is None:
-            if len(os.listdir(Ghidra.DEFAULT_INSTALL())) == 0:
-                return False
+            install_dir = Ghidra.DEFAULT_INSTALL()
 
-            install_dir = os.path.join(
-                Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
+        if len(os.listdir(install_dir)) == 0:
+            return False
 
-        return os.path.exists(os.path.join(install_dir, "support", "launch.sh"))
+        release_install = os.path.join(install_dir, os.listdir(install_dir)[0])
+        release_install = os.path.join(release_install, "support", "launch.sh")
+
+        build_install = os.path.join(install_dir, 'build', 'dist')
+                
+        return os.path.exists(release_install) or os.path.exists(build_install)
 
     def __init__(self, verbose=True, project_path: str = None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List, Union, Set, IO, Optional, Iterable, Any, Type
+from typing_extensions import Annotated
 from functools import cached_property
 from pathlib import Path
 from collections import defaultdict
@@ -10,6 +11,8 @@ import hashlib
 
 import networkx as nx
 from pydantic import BaseModel, computed_field, model_validator
+from pydantic.functional_serializers import PlainSerializer
+from pydantic.functional_validators import PlainValidator
 from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 from sqlalchemy.engine.base import Engine
@@ -25,6 +28,16 @@ from .source import C_Code
 parsers = defaultdict(lambda: None)
 parsers['C'] = C_Code
 
+def bytes_validator(x:Union[bytes,bytearray,str]) -> bytes:
+    if isinstance(x, bytes):
+        return x
+    if isinstance(x, bytearray):
+        return bytes(x)
+    if isinstance(x, str):
+        return bytes.fromhex(x)
+    raise ValueError(f"Does not appear to be bytes or hexstring: {x}")
+
+Bytes = Annotated[bytes, PlainValidator(bytes_validator), PlainSerializer(lambda x: x.hex())]
 
 class Backend:
     engine: Engine = None
@@ -208,7 +221,7 @@ class Instruction(NativeCode):
     _backend: Backend = Backend()
 
     address: Optional[int] = None
-    data: bytes
+    data: Bytes
     asm: Optional[str] = ""
     comment: Optional[str] = ""
     ir: Optional[IR] = None

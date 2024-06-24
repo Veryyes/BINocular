@@ -1,4 +1,5 @@
 import itertools
+import tempfile
 
 from binocular import Ghidra, Binary
 
@@ -6,6 +7,18 @@ from binocular import Ghidra, Binary
 # on close(), jpype's JVM shutdown is called and 
 # the JVM in this python process cannot be launched again 
 Ghidra._DONT_SHUTDOWN_JVM = True
+
+def test_install_release():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not Ghidra.is_installed(install_dir=tmpdirname)
+        Ghidra.install(version="11.1.1", install_dir=tmpdirname)
+        assert Ghidra.is_installed(install_dir=tmpdirname)
+
+def test_build_commit():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not Ghidra.is_installed(install_dir=tmpdirname)
+        Ghidra.install(version="1e4882d", build=True, install_dir=tmpdirname)
+        assert Ghidra.is_installed(install_dir=tmpdirname)
 
 def test_disassm(make):
     assert Ghidra.is_installed()

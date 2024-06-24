@@ -1,6 +1,19 @@
 import itertools
+import tempfile
 
 from binocular import Rizin, Binary
+
+def test_install_release():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not Rizin.is_installed(install_dir=tmpdirname)
+        Rizin.install(version="v0.7.3", install_dir=tmpdirname)
+        assert Rizin.is_installed(install_dir=tmpdirname)
+
+def test_build_commit():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not Rizin.is_installed(install_dir=tmpdirname)
+        Rizin.install(version="87add99", build=True, install_dir=tmpdirname)
+        assert Rizin.is_installed(install_dir=tmpdirname)
 
 def test_disassm(make):
     with Rizin() as g:
