@@ -4,6 +4,12 @@
 
 # BINocular - Common Binary Analysis Framework
 
+![Static Badge](https://img.shields.io/badge/license-GPLv3-green) 
+![Static Badge](https://img.shields.io/badge/Python-3.10-blue)
+
+![Static Badge](https://img.shields.io/badge/Disassembler-Rizin-yellow)
+![Static Badge](https://img.shields.io/badge/Disassembler-Ghidra-red)
+
 BINocular is an python package for static analysis of compiled binaries 
 through a common API layer. It is an abstraction layer between different
 disassemblers and provides:
