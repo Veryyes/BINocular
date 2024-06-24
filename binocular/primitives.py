@@ -328,6 +328,7 @@ class BasicBlock(NativeCode):
     @classmethod
     def from_orm(cls, orm):
         bb = cls(
+            address=orm.address,
             architecture=orm.architecture,
             endianness=orm.endianness,
             bitness=orm.bitness,
@@ -978,9 +979,12 @@ class Binary(NativeCode):
         )
         b.set_path(orm.metainfo.path)
 
+        if b._functions is None:
+            b._functions = set()
+
         for f in orm.functions:
             func = NativeFunction.from_orm(f)
-            b.functions.add(func)
+            b._functions.add(func)
 
         return b
 
