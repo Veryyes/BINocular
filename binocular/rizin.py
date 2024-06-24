@@ -81,6 +81,9 @@ class Rizin(Disassembler):
         os.makedirs(install_dir, exist_ok=True)
 
         if build:
+            if version is None:
+                raise ValueError("No commit version supplied")
+                
             logger.info(f"Cloning Rizin to: {install_dir}")
             try:
                 repo = Repo.clone_from(Rizin.GIT_REPO, install_dir)

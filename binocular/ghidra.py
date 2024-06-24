@@ -100,6 +100,9 @@ class Ghidra(Disassembler):
 
     @classmethod
     def _build(cls, version, install_dir):
+        if version is None:
+            raise ValueError("No commit version supplied")
+
         logger.info(f"Building Ghidra @ commit {version}")
 
         # dependency check
