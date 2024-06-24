@@ -1,4 +1,7 @@
-![BINocular Logo](./imgs/BINocular-logo-background.svg)
+<p align="center">
+	<img src="./imgs/BINocular-logo-background.svg" width=30% height=30%>
+</p>
+
 # BINocular - Common Binary Analysis Framework
 
 BINocular is an python package for static analysis of compiled binaries 
