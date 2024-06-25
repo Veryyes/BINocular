@@ -302,3 +302,12 @@ def test_c_func25():
     assert src.return_type == 'int'
 
     assert len(set(["extern", "const", "volatile"]) ^ src.qualifiers) == 0
+
+def test_c_func26():
+    # Decompiled code from Ghidra
+    # Though still human readable as a function, its not tenable to try to 
+    # robustly parse through decompiler input as it is not always proper C
+    f = b'caseD_96(void)\n\n{\n  undefined4 *puVar1;\n  SSL *pSVar2;\n  undefined4 uVar3;\n  undefined4 uVar4;\n  undefined4 *unaff_r6;\n  SSL *unaff_r10;\n  \n  puVar1 = (undefined4 *)BIO_get_data();\n  SSL_free((SSL *)puVar1[4]);\n  pSVar2 = SSL_dup(unaff_r10);\n  uVar3 = unaff_r6[5];\n  uVar4 = unaff_r6[2];\n  puVar1[3] = unaff_r6[3];\n  puVar1[4] = pSVar2;\n  if (pSVar2 != (SSL *)0x0) {\n    pSVar2 = (SSL *)0x1;\n  }\n  puVar1[2] = uVar4;\n  uVar4 = unaff_r6[1];\n  *puVar1 = *unaff_r6;\n  puVar1[1] = uVar4;\n  puVar1[5] = uVar3;\n  return pSVar2;\n}'
+    src = SourceFunction.from_code("caseD_96", f)
+
+    assert src is None
