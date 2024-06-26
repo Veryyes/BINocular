@@ -56,7 +56,7 @@ def parse(
             print(f"\tBits: {b.bitness}")
             print(f"\tEndian: {b.endianness}")
             print(f"\tSHA256: {b.sha256}")
-            print(f"\tSize: {len(b.bytes())}")
+            print(f"\tSize: {len(b)}")
             print(f"\tNum Functions: {len(b.functions)}")
 
         if uri is not None:
