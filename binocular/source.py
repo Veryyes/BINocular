@@ -86,6 +86,7 @@ class C_Code:
 
     @staticmethod
     def get_name(func_def, encoding: str = 'utf8'):
+        
         next_n = get_child_by_type(func_def, 'pointer_declarator')
         if next_n is None:
             next_n = func_def
@@ -93,6 +94,11 @@ class C_Code:
             next_n, _ = unwind_ptr(next_n)
 
         func_dec = get_child_by_type(next_n, "function_declarator")
+
+        # Unable to find function_declarator
+        if func_dec is None:
+            return None
+
         id_node = get_child_by_type(func_dec, 'identifier')
         if id_node is not None:
             return str(id_node.text, encoding=encoding)
