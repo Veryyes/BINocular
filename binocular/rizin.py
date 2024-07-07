@@ -393,13 +393,13 @@ class Rizin(Disassembler):
         branches = list()
         if bb_ctxt.get('fail', None) is not None:
             branches.append(
-                Branch(btype=BranchType.FalseBranch, target=bb_ctxt['fail']))
+                Branch(type=BranchType.FalseBranch, target=bb_ctxt['fail']))
             if bb_ctxt.get('jump', None) is not None:
                 branches.append(
-                    Branch(btype=BranchType.TrueBranch, target=bb_ctxt['jump']))
+                    Branch(type=BranchType.TrueBranch, target=bb_ctxt['jump']))
         elif bb_ctxt.get('jump', None) is not None:
             branches.append(
-                Branch(btype=BranchType.UnconditionalBranch, target=bb_ctxt['jump']))
+                Branch(type=BranchType.UnconditionalBranch, target=bb_ctxt['jump']))
 
         return branches
 

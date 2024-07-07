@@ -578,13 +578,13 @@ class Ghidra(Disassembler):
                 dest_addr = dest.getDestinationAddress().getOffset()
                 flow_type = dest.getFlowType()
                 if flow_type.hasFallthrough():
-                    yield Branch(btype=BranchType.FalseBranch, target=dest_addr)
+                    yield Branch(type=BranchType.FalseBranch, target=dest_addr)
                 elif flow_type.isConditional():
-                    yield Branch(btype=BranchType.TrueBranch, target=dest_addr)
+                    yield Branch(type=BranchType.TrueBranch, target=dest_addr)
                 elif flow_type.isUnConditional():
-                    yield Branch(btype=BranchType.UnconditionalBranch, target=dest_addr)
+                    yield Branch(type=BranchType.UnconditionalBranch, target=dest_addr)
                 elif flow_type.isComputed():
-                    yield Branch(btype=BranchType.IndirectBranch, target=None)
+                    yield Branch(type=BranchType.IndirectBranch, target=None)
 
     def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple(bytes, str)]:
         '''
