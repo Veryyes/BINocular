@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from .consts import Endian, IL, RefType
+from .consts import Endian, IL, RefType, BranchType
 
 from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, BigInteger
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship
@@ -229,6 +229,17 @@ class BasicBlockORM(Base):
         back_populates='basic_block')
     xrefs: Mapped[List[ReferenceORM]] = relationship(
         back_populates='basic_block')
+    branches: Mapped[List[BranchORM]] = relationship(
+        back_populates='basic_block')
+
+
+class BranchORM(Base):
+    __tablename__ = "branches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[BranchType]
+    target: Mapped[int]
+    basic_block_id: Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
+    basic_block: Mapped[BasicBlockORM] = relationship(back_populates='branches')
 
 
 class ReferenceORM(Base):

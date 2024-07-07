@@ -20,7 +20,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 import pyvex
 
-from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, MAX_STR_SIZE
+from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, BranchORM, MAX_STR_SIZE
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 from .source import C_Code
@@ -66,19 +66,35 @@ class NoDBException(Exception):
     pass
 
 
-@dataclass
-class Branch:
+class Branch(BaseModel):
     '''
     Describes a branch in control flow
     '''
 
-    btype: BranchType
+    type: BranchType
     '''Type of Jump'''
     target: Optional[int]
     '''Address to Jump to'''
 
+    @classmethod
+    def orm_type(cls) -> Type:
+        return BranchORM
+
+    @classmethod
+    def from_orm(cls, orm):
+        return cls(
+            type=orm.type,
+            target=orm.target
+        )
+
     def __hash__(self):
-        return hash((self.btype, self.target))
+        return hash((self.type, self.target))
+
+    def orm(self):
+        return BranchORM(
+            type = self.type,
+            target = self.target
+        )
 
 
 @dataclass
@@ -356,7 +372,8 @@ class BasicBlock(NativeCode):
             endianness=orm.endianness,
             bitness=orm.bitness,
             pie=orm.pie,
-            xrefs=set(Reference.from_orm(ref) for ref in orm.xrefs)
+            xrefs=set(Reference.from_orm(ref) for ref in orm.xrefs),
+            branches=set(Branch.from_orm(b) for b in orm.branches)
         )
 
         for instr_orm in orm.instructions:
@@ -382,7 +399,7 @@ class BasicBlock(NativeCode):
                 raise StopIteration
 
             branch_data = self.blocks[self.idx]
-            btype = branch_data.btype
+            btype = branch_data.type
             addr = branch_data.target
 
             target_bb = self.block_cache.get(addr, None)
@@ -456,7 +473,8 @@ class BasicBlock(NativeCode):
             bitness=self.bitness,
             pie=self.pie,
             size=len(self),
-            xrefs=[xref.orm() for xref in self.xrefs]
+            xrefs=[xref.orm() for xref in self.xrefs],
+            branches=[branch.orm() for branch in self.branches]
         )
 
         for instr in self.instructions:
