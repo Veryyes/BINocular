@@ -19,11 +19,14 @@ from sqlalchemy.engine.base import Engine
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 import pyvex
+import lief
 
 from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, BranchORM, MAX_STR_SIZE
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 from .source import C_Code
+
+lief.disable_leak_warning()
 
 parsers = defaultdict(lambda: None)
 parsers['C'] = C_Code
