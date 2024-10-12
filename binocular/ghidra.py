@@ -130,6 +130,19 @@ class Ghidra(Disassembler):
             ["gradle", "buildGhidra"]
         ]
 
+        no_init_gradle_commit = repo.commit("30628db2d09d7b4ce46368b7522dc315e7b245c5")
+        target_commit = repo.commit(version)
+
+        common_ancestor = repo.merge_base(no_init_gradle_commit, target_commit)
+        if target_commit in common_ancestor:
+            # do nothing
+            pass
+        elif no_init_gradle_commit in common_ancestor:
+            # remove init in gradle command
+            del cmds[0][-1]
+        else:
+            raise Exception("Is {version} a valid commit hash?")
+
         for cmd in cmds:
             logger.info(f"$ {' '.join(cmd)}")
             out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
