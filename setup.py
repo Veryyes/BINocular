@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="BINocular",
-    version="1.0",
+    version="1.1",
     description="Common Binary Framework",
     author="Brandon Wong",
     packages = ["binocular"],
