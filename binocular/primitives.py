@@ -163,7 +163,7 @@ class Reference(BaseModel):
         return hash((self.from_, self.to, self.type.value))
 
     def __repr__(self):
-        return f"{hex(self.from_)} -{self.type.name}-> {hex(self._to)}"
+        return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
 
     def orm(self):
         return ReferenceORM(
