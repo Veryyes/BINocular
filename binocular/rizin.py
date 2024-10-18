@@ -71,7 +71,7 @@ class Rizin(Disassembler):
         return sys_install or local_install_pre_built or local_install_build
 
     @classmethod
-    def install(cls, version: str = None, install_dir=None, build=False) -> str:
+    def install(cls, version: str = None, install_dir=None, build=False, local_install_file:str=None) -> str:
         '''Installs the disassembler to a user specified directory or within the python module if none is specified'''
         logger.info("Installing Rizin")
 
@@ -106,37 +106,47 @@ class Rizin(Disassembler):
                 if len(err) > 0:
                     logger.info(f"[STDERR] {err}")
         else:
-            r = requests.get(cls.GITHUB_API)
-            if r.status_code != 200:
-                raise Exception(f"Cannot reach {cls.GITHUB_API}")
+            if local_install_file is None:
+                r = requests.get(cls.GITHUB_API)
+                if r.status_code != 200:
+                    raise Exception(f"Cannot reach {cls.GITHUB_API}")
 
-            release_data = json.loads(r.text)
-            links = OrderedDict()
-            for release in release_data:
-                ver = release['name'].rsplit(" ", 1)[1]
+                release_data = json.loads(r.text)
+                links = OrderedDict()
+                for release in release_data:
+                    ver = release['name'].rsplit(" ", 1)[1]
 
-                for asset in release['assets']:
-                    # Only supporting linux x86 as of now
-                    if 'static-x86_64' in asset['name']:
-                        dl_link = asset['browser_download_url']
-                        links[ver] = dl_link
-                        break
+                    for asset in release['assets']:
+                        # Only supporting linux x86 as of now
+                        if 'static-x86_64' in asset['name']:
+                            dl_link = asset['browser_download_url']
+                            links[ver] = dl_link
+                            break
 
-            if version is None:
-                version = next(iter(links.keys()))
-            elif version not in links:
-                logger.critical(f"Rizin version {version} not found")
-                raise Exception(f"Rizin version {version} not found")
+                if version is None:
+                    version = next(iter(links.keys()))
+                elif version not in links:
+                    logger.critical(f"Rizin version {version} not found")
+                    raise Exception(f"Rizin version {version} not found")
 
-            dl_link = links[version]
-            logger.info(f"Installing Rizin {version} to {install_dir}")
-            logger.info(f"Downloading {dl_link}...")
-            with tempfile.TemporaryFile() as fp:
-                fp.write(urlopen(dl_link).read())
-                fp.seek(0)
-                with lzma.open(fp) as xz:
-                    with tarfile.open(fileobj=xz) as tar:
-                        tar.extractall(install_dir)
+                dl_link = links[version]
+                logger.info(f"Installing Rizin {version} to {install_dir}")
+                logger.info(f"Downloading {dl_link}...")
+                with tempfile.TemporaryFile() as fp:
+                    fp.write(urlopen(dl_link).read())
+                    fp.seek(0)
+                    with lzma.open(fp) as xz:
+                        with tarfile.open(fileobj=xz) as tar:
+                            tar.extractall(install_dir)
+            else:
+                if not os.path.exists(local_install_file):
+                    raise Exception(f"File Does not Exist: {local_install_file}")
+
+                with open(local_install_file, 'rb') as fp:
+                    with lzma.open(fp) as xz:
+                        with tarfile.open(fileobj=xz) as tar:
+                            tar.extractall(install_dir)
+                        
 
         logger.info("Rizin Install Completed")
         return install_dir

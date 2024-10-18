@@ -378,9 +378,13 @@ class Disassembler(ABC):
 
     @classmethod
     @abstractmethod
-    def install(cls, version: str = None, install_dir=None, build=False) -> str:
+    def install(cls, version: str = None, install_dir:str=None, build:bool=False, local_install_file:str=None) -> str:
         '''
         Installs the disassembler to a user specified directory or within the python module if none is specified
+        :param version: The release version or commit hash. If commit hash is provided build must be set True. Ignored if local_install_file is provided
+        :param install_dir: The directory to install the disassembler too
+        :param build: True if the disassembler should be built from source
+        :param local_install_file: Path to the release file of the disassembler
         :returns: the directory the disassembler is installed to
         '''
         raise NotImplementedError
