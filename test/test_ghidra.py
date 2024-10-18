@@ -1,5 +1,6 @@
 import itertools
 import tempfile
+from urllib.request import urlopen
 
 from binocular import Ghidra, Binary
 
@@ -13,6 +14,17 @@ def test_install_release():
         assert not Ghidra.is_installed(install_dir=tmpdirname)
         Ghidra.install(version="11.1.1", install_dir=tmpdirname)
         assert Ghidra.is_installed(install_dir=tmpdirname)
+
+def test_install_local():
+    url = 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.2_build/ghidra_11.2_PUBLIC_20240926.zip'
+    with tempfile.TemporaryFile() as fp:
+        fp.write(urlopen(url).read())
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            assert not Ghidra.is_installed(install_dir=tmpdirname)
+            Ghidra.install(install_dir=tmpdirname, local_install_file=fp.name)
+            assert Ghidra.is_installed(install_dir=tmpdirname)
+        
 
 def test_build_commit():
     with tempfile.TemporaryDirectory() as tmpdirname:
