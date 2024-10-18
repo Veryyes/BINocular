@@ -63,38 +63,48 @@ class Ghidra(Disassembler):
         return versions
 
     @classmethod
-    def _install_prebuilt(cls, version, install_dir):
-        # Ask Github API for Ghidra Release versions and the
-        # prebuilt download link
-        r = requests.get(Ghidra.GITHUB_API)
-        if r.status_code != 200:
-            logger.critical(f"Cannot reach {Ghidra.GITHUB_API}")
-            raise Exception(f"Cannot reach {Ghidra.GITHUB_API}")
+    def _install_prebuilt(cls, version:str, install_dir:str, local_install_file:str=None):
+        if local_install_file is None:
+            # Ask Github API for Ghidra Release versions and the
+            # prebuilt download link
+            r = requests.get(Ghidra.GITHUB_API)
+            if r.status_code != 200:
+                logger.critical(f"Cannot reach {Ghidra.GITHUB_API}")
+                raise Exception(f"Cannot reach {Ghidra.GITHUB_API}")
 
-        release_data = json.loads(r.text)
-        links = OrderedDict()
-        for release in release_data:
-            ver = release['name'].rsplit(" ", 1)[1].strip()
-            dl_link = release['assets'][0]['browser_download_url']
-            links[ver] = dl_link
+            release_data = json.loads(r.text)
+            links = OrderedDict()
+            for release in release_data:
+                ver = release['name'].rsplit(" ", 1)[1].strip()
+                dl_link = release['assets'][0]['browser_download_url']
+                links[ver] = dl_link
 
-        if version is None:
-            # Version not specified. getting latest
-            version = next(iter(links.keys()))
-        elif version not in links:
-            logger.critical(f"Ghidra version {version} not found")
-            raise Exception(f"Ghidra version {version} not found")
+            if version is None:
+                # Version not specified. getting latest
+                version = next(iter(links.keys()))
+            elif version not in links:
+                logger.critical(f"Ghidra version {version} not found")
+                raise Exception(f"Ghidra version {version} not found")
 
-        dl_link = links[version]
+            dl_link = links[version]
 
-        logger.info(f"Installing Ghidra {version} to {install_dir}")
-        logger.info(f"Downloading {dl_link}...")
-        with tempfile.TemporaryFile() as fp:
-            fp.write(urlopen(dl_link).read())
-            fp.seek(0)
-            logger.info("Extracting Ghidra")
-            with zipfile.ZipFile(fp, 'r') as zf:
-                zf.extractall(install_dir)
+            logger.info(f"Installing Ghidra {version} to {install_dir}")
+            logger.info(f"Downloading {dl_link}...")
+
+            with tempfile.TemporaryFile() as fp:
+                fp.write(urlopen(dl_link).read())
+                fp.seek(0)
+                logger.info("Extracting Ghidra")
+                with zipfile.ZipFile(fp, 'r') as zf:
+                    zf.extractall(install_dir)
+        else:
+            if not os.path.exists(local_install_file):
+                raise Exception(f"File Does not Exist: {local_install_file}")
+
+            # Assume this is a zip of a Ghidra Release
+            with open(local_install_file, 'rb') as fp:
+                with zipfile.ZipFile(fp, 'r') as zf:
+                    zf.extractall(install_dir)
 
         return os.path.join(install_dir, os.listdir(install_dir)[0])
 
@@ -160,7 +170,7 @@ class Ghidra(Disassembler):
         return os.path.join(dist, "_".join(os.path.basename(zip_file).split('_')[:3]))
 
     @classmethod
-    def install(cls, version: str = None, install_dir=None, build=False) -> str:
+    def install(cls, version: str = None, install_dir=None, build=False, local_install_file:str=None) -> str:
         '''
         Installs the disassembler to a user specified directory or within the python module if none is specified
         :param version: Release Version Number or Commit Hash
@@ -175,7 +185,7 @@ class Ghidra(Disassembler):
         if build:
             ghidra_home = Ghidra._build(version, install_dir)
         else:
-            ghidra_home = Ghidra._install_prebuilt(version, install_dir)
+            ghidra_home = Ghidra._install_prebuilt(version, install_dir, local_install_file=local_install_file)
 
         logger.info("Ghidra Install Completed")
         assert os.path.exists(ghidra_home)
