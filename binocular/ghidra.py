@@ -12,12 +12,13 @@ import logging
 import hashlib
 import json
 import shutil
+import re
+import subprocess
+import struct
+import time
+import select
 
-import pyhidra
-from pyhidra.launcher import PyhidraLauncher, HeadlessPyhidraLauncher
-from pyhidra.core import _setup_project, _analyze_program
 import requests
-import jpype
 import coloredlogs
 from git import Repo
 import git
@@ -31,10 +32,55 @@ logger = logging.getLogger(__name__)
 coloredlogs.install(
     fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
+class PipeRPC:
+    '''Type-Length-Value Style Protocol'''
+
+    # Requests will have no length. Size is known
+    # Procedure ID | BasicBlock Address | Function Address
+    REQFMT = "!BQQ"
+
+    # Procedure ID | Total Length | Data... 
+    RESFMT = "!BI"
+
+    def __init__(self, path:str):
+        self.root_path = path
+        os.makedirs(self.root_path, exist_ok=False)
+        
+        self.send_pipe_path = os.path.join(self.root_path, "send")
+        self.recv_pipe_path = os.path.join(self.root_path, "recv")
+        
+        if os.path.exists(self.send_pipe_path) or os.path.exists(self.recv_pipe_path):
+            raise Exception(f"Send or Recv pipe exists already: {self.root_path}")
+
+        os.mkfifo(self.send_pipe_path)
+        os.mkfifo(self.recv_pipe_path)
+        
+    def request(self, id:int, bb_addr:int=0, f_addr:int=0, timeout:int=60) -> bytes:
+        msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr)
+        with open(self.send_pipe_path, 'wb') as fp:
+            fp.write(msg)
+            fp.flush()
+
+        with open(self.recv_pipe_path, 'rb') as fp:
+            rpipe_list, _, _ = select.select([fp], [], [], timeout)
+            
+            if len(rpipe_list) == 0:
+                raise Exception("Timeout")
+
+            fp.read(1)
+            res_id, size = struct.unpack(PipeRPC.RESFMT, fp.read(5))
+            assert res_id == id + 1
+
+            if size < 0:
+                raise Exception("Size cannot be negative")
+
+            if size > 0:
+                return fp.read(size)
+
+        return b""
+
 
 class Ghidra(Disassembler):
-    _DONT_SHUTDOWN_JVM = False
-
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
     GITHUB_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
 
@@ -47,6 +93,10 @@ class Ghidra(Disassembler):
     def DEFAULT_PROJECT_PATH():
         '''Default Ghidra Project Path (Within Python Package Installation)'''
         return os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path), 'data', 'ghidra_proj')
+
+    @staticmethod
+    def SCRIPT_PATH():
+        return os.path.join(os.path.join(os.path.dirname(pkgutil.get_loader('binocular').path)), "scripts")
 
     @classmethod
     def list_versions(cls):
@@ -224,7 +274,8 @@ class Ghidra(Disassembler):
                 
         return os.path.exists(release_install) or os.path.exists(build_install)
 
-    def __init__(self, verbose=True, project_path: str = None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
+    
+    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
 
         self.project = None
@@ -235,46 +286,52 @@ class Ghidra(Disassembler):
         if self.jvm_args is None:
             self.jvm_args = list()
 
+        self.ghidra_url = ghidra_url
+        # TODO assert check
+
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH()
         self.base_project_path = project_path
 
         if home is None:
+            ghidra_release_patttern = re.compile(r"ghidra_(\d+(\.\d+)*)_PUBLIC")
+            ghidra_dir = None
+            for dir in os.listdir(Ghidra.DEFAULT_INSTALL()):
+                if ghidra_release_patttern.match(dir):
+                    ghidra_dir = dir
+                    break
+
+            if ghidra_dir is None:
+                raise Exception(f"Unable to find Ghidra install directory inside of {self.ghidra_home}")
+
             self.ghidra_home = os.path.join(
-                Ghidra.DEFAULT_INSTALL(), os.listdir(Ghidra.DEFAULT_INSTALL())[0])
+                Ghidra.DEFAULT_INSTALL(), ghidra_dir)
         else:
             self.ghidra_home = home
+
+        self.rpc_pipe = None
 
         self.save_on_close = save_on_close
         self.decomp_timeout = 60
 
+    def _analyze_headless_path(self):
+        # TODO, if windows, set to analyzeHeadless.bat
+        return os.path.join(
+            self.ghidra_home,
+            "support",
+            "analyzeHeadless"
+        )
+
     def open(self):
-        if not PyhidraLauncher.has_launched():
-            launcher = HeadlessPyhidraLauncher(
-                install_dir=self.ghidra_home, verbose=False)
-            launcher.add_vmargs(*self.jvm_args)
-            launcher.start()
+        self.fifo_dir = tempfile.mkdtemp()
         return self
 
     def close(self):
-        from ghidra.app.script import GhidraScriptUtil
-        GhidraScriptUtil.releaseBundleHostReference()
-
-        if self.decomp is not None:
-            self.decomp.closeProgram()
-
-        if self.project is not None:
-            if self.save_on_close:
-                self.project.save(self.program)
-            self.project.close()
-
-        if jpype.isJVMStarted() and not self.__class__._DONT_SHUTDOWN_JVM:
-            jpype.shutdownJVM()
+        self.clear()
+        os.rmdir(self.fifo_dir)
 
     def clear(self):
-        from ghidra.app.script import GhidraScriptUtil
         super().clear()
-        GhidraScriptUtil.releaseBundleHostReference()
         if self.decomp is not None:
             self.decomp.closeProgram()
         if self.save_on_close:
@@ -284,6 +341,16 @@ class Ghidra(Disassembler):
         self.project = None
         self.program = None
         self.flat_api = None
+
+        os.unlink(self.pipe_path)
+        if self.ghidra_proc is not None:
+            try:
+                self.rpc_pipe.request(0)
+                out, err = self.ghidra_proc.communicate()
+                print(out, err)
+            except TimeoutError:
+                self.ghidra_proc.kill()
+                logger.warn("Killed Ghidra Process. Took Too long")
 
     def get_sections(self) -> Iterable[Section]:
         '''
@@ -320,49 +387,59 @@ class Ghidra(Disassembler):
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: True on success, false otherwise
         '''
-        from ghidra.app.script import GhidraScriptUtil
-        from ghidra.program.flatapi import FlatProgramAPI
-        from ghidra.app.decompiler import DecompInterface, DecompileOptions
-        from ghidra.util.task import ConsoleTaskMonitor
-        from ghidra.program.model.block import BasicBlockModel
+        cmd = [self._analyze_headless_path()]
+        if self.ghidra_url is not None:
+            cmd.append(self.ghidra_url)
+        else:
+            with open(path, 'rb') as f:
+                md5hash = hashlib.md5(f.read()).hexdigest()
 
-        with open(path, 'rb') as f:
-            project_path = os.path.join(
-                self.base_project_path, hashlib.md5(f.read()).hexdigest())
+            # Containing folder of the project is the same name of the project
+            # A little cleaner to handle when you can just rm the <md5sum>/ to 
+            # delete a whole project if need be
+            self.project_location = os.path.join(self.base_project_path, md5hash)
+            self.project_name = md5hash
+            os.makedirs(self.project_location, exist_ok=True)
+            cmd += [self.project_location, self.project_name]
 
-        self.project_location = os.path.dirname(project_path)
-        self.project_name = os.path.basename(project_path)
+        self.rpc_pipe = PipeRPC(os.path.join(self.fifo_dir, self.project_name))
+        
 
-        import java
-        try:
-            self.project, self.program = _setup_project(
-                path,
-                self.project_location,
-                self.project_name,
-                None,
-                None
+        # Import a new File into Ghidra
+        # if we already imported it, this will fail and nothing bad happens
+        # except that we wasted time.
+        if len(os.listdir(self.project_location)) == 0:
+            import_cmd = cmd + ["-import", path]
+            self.ghidra_proc = subprocess.Popen(
+                import_cmd,
+                stdout = subprocess.PIPE,
+                stderr = subprocess.PIPE
             )
-            GhidraScriptUtil.acquireBundleHostReference()
+            self.ghidra_proc.communicate()
 
-            self.flat_api = FlatProgramAPI(self.program)
-            _analyze_program(self.flat_api, self.program)
+        # Run the BinocularPipe Script
+        cmd += [
+            "-process", os.path.basename(path),
+            "-scriptPath", Ghidra.SCRIPT_PATH(),
+            "-postScript", "BinocularPipe.java", self.rpc_pipe.root_path
+        ]
+        # print(" ".join(cmd))
+        self.ghidra_proc = subprocess.Popen(
+            cmd,
+            stdout = subprocess.PIPE,
+            stderr = subprocess.PIPE
+        )
 
-            # Create refs to all the managers that ghidra has lol
-            self.base_addr = self.program.getImageBase()
-            self.fm = self.program.getFunctionManager()
-            self.st = self.program.getSymbolTable()
-            self.ref_m = self.program.getReferenceManager()
-            self.lang_description = self.program.getLanguage().getLanguageDescription()
-            self.bb_model = BasicBlockModel(self.program)
-            self.listing = self.program.getListing()
-            self.monitor = ConsoleTaskMonitor()
-            self.decomp = DecompInterface()
-            self.decomp.setOptions(DecompileOptions())
-            self.decomp.openProgram(self.program)
-        except java.lang.OutOfMemoryError as ex:
-            logger.critical(ex.stacktrace())
-            return False, "java.lang.OutOfMemoryError"
+        # If you wanna see java's stdout
+        # import threading
+        # def getoutput(proc):
+        #     for line in iter(proc.stdout.readline, b""):
+        #         print(str(line, 'utf8'),end='')
 
+        # x=threading.Thread(target=getoutput, args=(self.ghidra_proc,))
+        # x.start()
+
+        
         return True, None
 
     def get_binary_name(self) -> str:
@@ -371,14 +448,14 @@ class Ghidra(Disassembler):
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
-        from ghidra.program.model.symbol import SymbolType
+        # from ghidra.program.model.symbol import SymbolType
 
-        for ep_addr in self.st.getExternalEntryPointIterator():
-            sym = self.flat_api.getSymbolAt(ep_addr)
-            if sym.getSymbolType().equals(SymbolType.FUNCTION):
-                entry = self.fm.getFunctionAt(ep_addr)
-                if entry.callingConventionName == 'processEntry':
-                    return ep_addr.getOffset()
+        # for ep_addr in self.st.getExternalEntryPointIterator():
+        #     sym = self.flat_api.getSymbolAt(ep_addr)
+        #     if sym.getSymbolType().equals(SymbolType.FUNCTION):
+        #         entry = self.fm.getFunctionAt(ep_addr)
+        #         if entry.callingConventionName == 'processEntry':
+        #             return ep_addr.getOffset()
 
         return None
 

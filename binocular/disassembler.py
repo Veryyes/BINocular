@@ -41,6 +41,8 @@ class Disassembler(ABC):
         self._func_addrs: Dict[int, NativeFunction] = dict()
         self._bbs: Dict[int, BasicBlock] = dict()
         self._instrs: Dict[int, Instruction] = dict()
+        self.binary = None
+        self.functions = list()
 
     def __enter__(self):
         return self.open()

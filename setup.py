@@ -19,7 +19,6 @@ setup(
         'GitPython',
         'meson',
         'rzpipe',
-        'pyhidra',
         'tree-sitter',
         'tree-sitter-c',
         'requests',
