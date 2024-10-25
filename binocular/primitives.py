@@ -185,8 +185,6 @@ class Argument(BaseModel):
     var_args: bool = False
     '''True when the argument is Variadic (i.e. more than one argument, like printf)'''
 
-    is_func_ptr: bool = False
-
     # TODO pydantic alias fields
     # so we can represent args in multiple langs?
 

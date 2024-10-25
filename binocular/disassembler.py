@@ -460,7 +460,7 @@ class Disassembler(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
+    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
         raise NotImplementedError
 

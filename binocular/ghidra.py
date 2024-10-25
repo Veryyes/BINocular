@@ -15,7 +15,6 @@ import shutil
 import re
 import subprocess
 import struct
-import time
 import select
 
 import requests
@@ -33,7 +32,39 @@ coloredlogs.install(
     fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 class PipeRPC:
-    '''Type-Length-Value Style Protocol'''
+    '''
+    Type-Length-Value Style Protocol
+    **NOT** Thread or Multiprocess Safe *LMAO!!*
+    '''
+    QUIT = 0
+    TEST = 2
+    BINARY_NAME = 4
+    ENTRY_POINT = 6
+    ARCHITECTURE = 8
+    ENDIANNESS = 10
+    BITNESS = 12
+    BASE_ADDR = 14
+    DYN_LIBS = 16
+    FUNCS = 18
+    # FUNC_ADDR = 20
+    FUNC_NAME = 22
+    FUNC_ARGS = 24
+    FUNC_RETURN = 26
+    FUNC_STACK_FRAME = 28
+    FUNC_CALLERS = 30
+    FUNC_CALLEES = 32
+    FUNC_XREFS = 34
+    FUNC_BB = 36
+    BB_ADDR = 38
+    BB_BRANCHES = 40
+    BB_INSTR = 42
+    # SECTIONS = 44
+    DECOMP = 46
+    FUNC_VARS = 48
+    INSTR_PCODE = 50
+    INSTR_COMMENT = 52
+    STRINGS = 54
+        
 
     # Requests will have no length. Size is known
     # Procedure ID | BasicBlock Address | Function Address
@@ -67,7 +98,6 @@ class PipeRPC:
             if len(rpipe_list) == 0:
                 raise Exception("Timeout")
 
-            fp.read(1)
             res_id, size = struct.unpack(PipeRPC.RESFMT, fp.read(5))
             assert res_id == id + 1
 
@@ -315,7 +345,6 @@ class Ghidra(Disassembler):
         self.decomp_timeout = 60
 
     def _analyze_headless_path(self):
-        # TODO, if windows, set to analyzeHeadless.bat
         return os.path.join(
             self.ghidra_home,
             "support",
@@ -345,7 +374,7 @@ class Ghidra(Disassembler):
         os.unlink(self.pipe_path)
         if self.ghidra_proc is not None:
             try:
-                self.rpc_pipe.request(0)
+                self.rpc_pipe.request(PipeRPC.QUIT)
                 out, err = self.ghidra_proc.communicate()
                 print(out, err)
             except TimeoutError:
@@ -431,20 +460,21 @@ class Ghidra(Disassembler):
         )
 
         # If you wanna see java's stdout
-        # import threading
-        # def getoutput(proc):
-        #     for line in iter(proc.stdout.readline, b""):
-        #         print(str(line, 'utf8'),end='')
+        import threading
+        def getoutput(proc):
+            for line in iter(proc.stdout.readline, b""):
+                print(str(line, 'utf8'),end='')
 
-        # x=threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        # x.start()
+        x=threading.Thread(target=getoutput, args=(self.ghidra_proc,))
+        x.start()
 
         
         return True, None
 
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''
-        return self.program.getName()
+        return str(self.rpc_pipe.request(PipeRPC.BINARY_NAME), 'utf8')
+
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
@@ -456,20 +486,19 @@ class Ghidra(Disassembler):
         #         entry = self.fm.getFunctionAt(ep_addr)
         #         if entry.callingConventionName == 'processEntry':
         #             return ep_addr.getOffset()
-
-        return None
+        return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.ENTRY_POINT))[0]
 
     def get_architecture(self) -> str:
         '''
         Returns the architecture of the binary.
-        For best results use either archinfo, qemu, or compilation triplet naming conventions.
+        For best compatibility use either archinfo, qemu, or compilation triplet naming conventions.
         https://github.com/angr/archinfo
         '''
-        return str(self.lang_description.getProcessor())
+        return str(self.rpc_pipe.request(PipeRPC.ARCHITECTURE), 'utf8')
 
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
-        endian = str(self.lang_description.getEndian())
+        endian = str(self.rpc_pipe.request(PipeRPC.ARCHITECTURE), 'utf8').lower()
         if endian == 'little':
             return Endian.LITTLE
         elif endian == 'big':
@@ -478,55 +507,55 @@ class Ghidra(Disassembler):
 
     def get_bitness(self) -> int:
         '''Returns the word size of the architecture (e.g., 16, 32, 64)'''
-        return self.lang_description.getSize()
+        return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.BITNESS))[0]
 
     def get_base_address(self) -> int:
         '''Returns the base address the binary is based at'''
-        return self.program.getImageBase().getOffset()
+        return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.BASE_ADDR))[0]
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
-        from ghidra.program.util import DefinedDataIterator
-
-        return [s.value for s in DefinedDataIterator.definedStrings(self.program)]
+        raise NotImplementedError
 
     def get_dynamic_libs(self) -> Iterable[str]:
         '''Returns the list of names of the dynamic libraries used in this binary'''
-        em = self.program.getExternalManager()
-        dyn_libs = list(em.getExternalLibraryNames())
-        if "<EXTERNAL>" in dyn_libs:
-            dyn_libs.pop(dyn_libs.index("<EXTERNAL>"))
+        raw = self.rpc_pipe.request(PipeRPC.DYN_LIBS)
+        return [str(lib, 'utf8') for lib in raw.split(b"\x00")]
 
-        return dyn_libs
-
-    def get_func_iterator(self) -> Iterable["ghidra.program.database.function.FunctionDB"]:
+    def get_func_iterator(self) -> Iterable[int]:
         '''
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data) 
         needed to construct a `Function` object for all functions in the binary.
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
-        for f in self.fm.getFunctions(True):
-            yield f
 
-    def get_func_addr(self, func_ctxt: Any) -> int:
+        # RPC returns back the address of each function
+        # We will use the address to index/address/key each function
+        raw = self.rpc_pipe.request(PipeRPC.FUNCS)
+        for n in range(0, len(raw), 8):
+            yield struct.unpack("!Q", raw[n: n + 8])[0]
+
+    def get_func_addr(self, func_ctxt: int) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return func_ctxt.getEntryPoint().getOffset()
+        # Here, func_ctxt is the address
+        return func_ctxt
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return func_ctxt.getName()
+        return str(self.rpc_pipe.request(PipeRPC.FUNC_NAME), 'utf8')
+        # return func_ctxt.getName()
 
-    @lru_cache
-    def _decompile(self, func_ctxt: Any):
-        '''Return DecompileResult object. lru_cache'd because it's a little expensive'''
-        res = self.decomp.decompileFunction(
-            func_ctxt, self.decomp_timeout, self.monitor)
-        if not res.decompileCompleted():
-            logger.warn(
-                f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
+    # @lru_cache
+    # def _decompile(self, func_ctxt: Any):
+    #     '''Return DecompileResult object. lru_cache'd because it's a little expensive'''
+    #     res = self.decomp.decompileFunction(
+    #         func_ctxt, self.decomp_timeout, self.monitor)
+    #     if not res.decompileCompleted():
+    #         logger.warn(
+    #             f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
 
-        return res
+    #     return res
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
