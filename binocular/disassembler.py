@@ -99,7 +99,7 @@ class Disassembler(ABC):
         self.binary.strings |= set(
             self.get_strings(io_stream, len(self.binary)))
         io_stream.close()
-
+        
         self.functions = set()
 
         logger.info(

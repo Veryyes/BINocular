@@ -10,6 +10,7 @@
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.nio.file.Paths;
@@ -49,8 +50,17 @@ import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.program.util.DefinedDataIterator;
 import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.model.symbol.Reference;
-import ghidra.program.model.symbol.ReferenceType;
+import ghidra.program.model.symbol.RefType;
 import ghidra.program.model.block.BasicBlockModel;
+import ghidra.program.model.block.CodeBlockReference;
+import ghidra.program.model.block.CodeBlockReferenceIterator;
+import ghidra.program.model.symbol.FlowType;
+import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.listing.CodeUnit;
+import ghidra.util.exception.CancelledException;
+import ghidra.program.model.mem.MemoryAccessException;
 
 class BINVariable{
     public String type;
@@ -86,6 +96,8 @@ class BINVariable{
 
 public class BinocularPipe extends GhidraScript{
     // Fuck enums
+    final byte ERROR = 0;
+
     final byte QUIT = 0;
     final byte TEST = 2;
     final byte BINARY_NAME = 4;
@@ -105,7 +117,7 @@ public class BinocularPipe extends GhidraScript{
     final byte FUNC_CALLEES = 32;
     final byte FUNC_XREFS = 34;
     final byte FUNC_BB = 36;
-    final byte BB_ADDR = 38;
+    // final byte BB_ADDR = 38;
     final byte BB_BRANCHES = 40;
     final byte BB_INSTR = 42;
     // final byte SECTIONS = 44;
@@ -114,7 +126,9 @@ public class BinocularPipe extends GhidraScript{
     final byte INSTR_PCODE = 50;
     final byte INSTR_COMMENT = 52;
     final byte STRINGS = 54;
+    final byte FUNC_IS_THUNK = 56;
 
+    // XRef Types
     final byte UNKNOWN = 0;
     final byte JUMP = 1;
     final byte CALL = 2;
@@ -122,11 +136,18 @@ public class BinocularPipe extends GhidraScript{
     final byte WRITE = 4;
     final byte DATA = 5;
 
+    // Branch Types
+    final byte TRUE = 0;
+    final byte FALSE = 1;
+    final byte UNCONDITIONAL = 2;
+    final byte INDIRECT = 3;
+
     SymbolTable st;
     FunctionManager fm;
     LanguageDescription ld;
     BasicBlockModel bbm;
     ReferenceManager rm;
+    Listing listing;
     ConsoleTaskMonitor monitor = new ConsoleTaskMonitor();
     DecompInterface decomp = new DecompInterface();
     HashMap<Long, CodeBlock> basicBlockMap = new HashMap<>();
@@ -145,6 +166,7 @@ public class BinocularPipe extends GhidraScript{
         this.ld = currentProgram.getLanguage().getLanguageDescription();
         this.rm = currentProgram.getReferenceManager();
         this.bbm = new BasicBlockModel(currentProgram);
+        this.listing = currentProgram.getListing();
         // Gracious 5 min timeout for decompilation
         this.timeout = 60 * 5;
         decomp.openProgram(currentProgram);
@@ -154,6 +176,7 @@ public class BinocularPipe extends GhidraScript{
             int id;
             long bbAddr = 0;
             long funcAddr = 0;
+            long instrAddr = 0;
             byte[] buff = new byte[8];
             byte[] response;
             int res_size = 0;
@@ -176,9 +199,17 @@ public class BinocularPipe extends GhidraScript{
 
                 rpipe.read(buff, 0, 8);
                 funcAddr = ByteBuffer.wrap(buff).getLong();
-            }
 
-            response = this.handleCommand(id, bbAddr, funcAddr);
+                rpipe.read(buff, 0, 8);
+                instrAddr = ByteBuffer.wrap(buff).getLong();
+            }
+            boolean error = false;
+            try{
+                response = this.handleCommand(id, bbAddr, funcAddr, instrAddr);
+            }catch (CancelledException e){
+                error = true;
+                response = e.toString().getBytes();
+            }
             
             if (response == null){
                 res_size = 0;
@@ -189,7 +220,11 @@ public class BinocularPipe extends GhidraScript{
             try(BufferedOutputStream wpipe = new BufferedOutputStream(new FileOutputStream(new File(sendPath)))){
                 ByteBuffer out_buff = ByteBuffer.allocate(res_size + 5);
                 out_buff.order(ByteOrder.BIG_ENDIAN);
-                out_buff.put((byte)(id+1));
+                if (error){
+                    out_buff.put(ERROR);    
+                }else{
+                    out_buff.put((byte)(id+1));
+                }
                 out_buff.putInt(res_size);
                 if (res_size > 0)
                     out_buff.put(response);
@@ -205,7 +240,7 @@ public class BinocularPipe extends GhidraScript{
         }
     }
 
-    private byte[] handleCommand(int id, long bbAddr, long funcAddr){
+    private byte[] handleCommand(int id, long bbAddr, long funcAddr, long instrAddr) throws CancelledException{
         Function f = null;
         CodeBlock bb = null;
 
@@ -217,6 +252,16 @@ public class BinocularPipe extends GhidraScript{
         if (bbAddr != 0){
             Long addrWrap = bbAddr;
             bb = this.basicBlockMap.get(addrWrap);
+            if(bb == null){
+                try{
+                    bb = bbm.getCodeBlockAt(getAddress(bbAddr), monitor);
+                }catch (CancelledException e){
+                    bb = null;
+                }
+                if (bb != null){
+                    this.basicBlockMap.put(addrWrap, bb);
+                }
+            }
         }
 
         switch(id){
@@ -254,24 +299,26 @@ public class BinocularPipe extends GhidraScript{
                 return this.packFunctionList(this.getFunctionCallees(f));
             case FUNC_XREFS:
                 return this.packReferenceList(this.getFunctionXRefs(f));
-            // case FUNC_BB:
-            //     return;
+            case FUNC_BB:
+                return this.packCodeBlockList(this.getFunctionBasicBlocks(f));
             // case BB_ADDR:
-            //     return;
-            // case BB_BRANCHES:
-            //     return;
-            // case BB_INSTR:
-            //     return;
-            // case DECOMP:
-            //     return;
-            // case FUNC_VARS:
-            //     return;
-            // case INSTR_PCODE:
-            //     return;
-            // case INSTR_COMMENT:
-            //     return;
-            // case STRINGS:
-            //     return;
+            //     return; // No need to implement for the same reason as FUNC_ADDR
+            case BB_BRANCHES:
+                return this.packCodeBlockRef(this.getBasicBlockBranches(bb));
+            case BB_INSTR:
+                return this.packInstructionList(this.getBasicBlockInstructions(bb));
+            case DECOMP:
+                return this.getFunctionDecompilation(f).getBytes();
+            case FUNC_VARS:
+                return this.packVariableList(this.getFunctionVars(f));
+            case INSTR_PCODE:
+                return this.getIR(getAddress(instrAddr)).getBytes();
+            case INSTR_COMMENT:
+                return this.getComments(getAddress(instrAddr)).getBytes();
+            case STRINGS:
+                return this.packStringList(this.getStrings());
+            case FUNC_IS_THUNK:
+                return f.isThunk() ? new byte[]{1} : new byte[]{0};
             default:
                 return null;
         }
@@ -352,7 +399,7 @@ public class BinocularPipe extends GhidraScript{
         ByteBuffer buf = ByteBuffer.allocate(total_length);
         buf.order(ByteOrder.BIG_ENDIAN);
         for(Reference r: refs){
-            ReferenceType rType = r.getReferenceType();
+            RefType rType = r.getReferenceType();
             if (rType.isCall()){
                 buf.put(CALL);
             }else if (rType.isJump()){
@@ -367,6 +414,68 @@ public class BinocularPipe extends GhidraScript{
 
             buf.putLong(r.getToAddress().getOffset());
             buf.putLong(r.getFromAddress().getOffset());
+        }
+        return buf.array();
+    }
+
+    private byte[] packCodeBlockList(List<CodeBlock> bbs){
+        int total_length = bbs.size() * 8;
+        ByteBuffer buf = ByteBuffer.allocate(total_length);
+        buf.order(ByteOrder.BIG_ENDIAN);
+
+        for(CodeBlock bb: bbs){
+            buf.putLong(bb.getFirstStartAddress().getOffset());
+        }
+        return buf.array();
+    }
+
+    private byte[] packCodeBlockRef(List<CodeBlockReference> refs){
+        int total_length = refs.size() * (1+8);
+        ByteBuffer buf = ByteBuffer.allocate(total_length);
+        buf.order(ByteOrder.BIG_ENDIAN);
+
+        for(CodeBlockReference ref: refs){
+            FlowType flow = ref.getFlowType();
+            if (flow.hasFallthrough()){
+                buf.put(FALSE);
+            }else if(flow.isConditional()){
+                buf.put(TRUE);
+            }else if(flow.isUnConditional()){
+                buf.put(UNCONDITIONAL);
+            }else if(flow.isComputed()){
+                buf.put(INDIRECT);
+            }else{
+                continue;
+            }
+
+            buf.putLong(ref.getDestinationAddress().getOffset());
+        }
+        return buf.array();
+    }
+
+    private byte[] packInstructionList(List<Instruction> instructions){
+        int total_length = 0;
+        for(Instruction i: instructions){
+            try{
+                total_length += i.getBytes().length + 1;
+            }catch (MemoryAccessException e){
+                total_length++;
+            }
+            total_length += i.getMnemonicString().getBytes().length + 1;
+        }
+        ByteBuffer buf = ByteBuffer.allocate(total_length);
+        buf.order(ByteOrder.BIG_ENDIAN);
+
+        for(Instruction i: instructions){
+            try{
+                buf.put((byte)i.getBytes().length);
+                buf.put(i.getBytes());
+            }catch (MemoryAccessException e){
+                buf.put((byte)0);
+            }
+
+            buf.put((byte)i.getMnemonicString().getBytes().length);
+            buf.put(i.getMnemonicString().getBytes());
         }
         return buf.array();
     }
@@ -390,12 +499,12 @@ public class BinocularPipe extends GhidraScript{
             Symbol sym = this.getSymbolAt(addr);
             if (sym.getSymbolType().equals(SymbolType.FUNCTION)){
                 Function entry = fm.getFunctionAt(addr);
-                if (entry.getCallingConventionName() == "processEntry") {
+                if (entry.getCallingConventionName().equals("processEntry")) {
                     return addr;
                 } 
             }
         }
-        return null;
+        return this.getAddress(0);
     }
 
     public String getArchitecture(){
@@ -539,14 +648,14 @@ public class BinocularPipe extends GhidraScript{
         for(Address addr: f.getBody().getAddresses(true)){
             for(Reference ref: rm.getReferencesFrom(addr)){
                 if (ref.getReferenceType().isCall()){
-                    list.add(fm.getFunctionAt(ref.getToAddress()))
+                    list.add(fm.getFunctionAt(ref.getToAddress()));
                 }
             }
         }
         return list;
     }
 
-    public List<Reference> getFunctionXRefs(Funciton f){
+    public List<Reference> getFunctionXRefs(Function f){
         LinkedList<Reference> refs = new LinkedList<>();
         for(Address addr: f.getBody().getAddresses(true)){
             for(Reference r: rm.getReferencesFrom(addr)){
@@ -559,7 +668,7 @@ public class BinocularPipe extends GhidraScript{
         return refs;
     }    
     
-    public List<CodeBlock> getFunctionBasicBlocks(Function f){
+    public List<CodeBlock> getFunctionBasicBlocks(Function f) throws CancelledException{
         LinkedList<CodeBlock> list = new LinkedList<>();
         HashSet<Long> history = new HashSet<Long>();
         for(CodeBlock bb: bbm.getCodeBlocksContaining(f.getBody(), monitor)){
@@ -568,10 +677,57 @@ public class BinocularPipe extends GhidraScript{
                 continue;
             }
 
+            basicBlockMap.put(bbAddr, bb);
             history.add(bbAddr);
             list.add(bb);
         }
         return list;
+    }
+
+    public List<CodeBlockReference> getBasicBlockBranches(CodeBlock bb) throws CancelledException{
+        LinkedList<CodeBlockReference> bbBranches = new LinkedList<>();
+        CodeBlockReferenceIterator iter = bb.getDestinations(monitor);
+        while (iter.hasNext()){
+            CodeBlockReference ref = iter.next();
+            Address destAddr = ref.getDestinationAddress();
+            if (fm.getFunctionAt(destAddr) != null)
+                continue;
+            bbBranches.add(ref);
+        }
+        return bbBranches;
+    }
+
+    public List<Instruction> getBasicBlockInstructions(CodeBlock bb){
+        LinkedList<Instruction> list = new LinkedList<>();
+        Instruction curr = listing.getInstructionAt(bb.getFirstStartAddress());
+        while (curr != null && bb.contains(curr.getAddress())){
+            list.add(curr);
+            curr = curr.getNext();
+        }
+        return list;
+    }
+
+    public String getIR(Address instructionAddress){
+        LinkedList<String> pcodeData = new LinkedList<>();
+        Instruction curr = listing.getInstructionAt(instructionAddress);
+        for(PcodeOp p: curr.getPcode()){
+            pcodeData.add(p.toString());
+        }
+        return String.join(";", pcodeData);
+    }
+
+    public String getComments(Address instructionAddress){
+        LinkedList<String> comments = new LinkedList<>();
+        Instruction curr = listing.getInstructionAt(instructionAddress);
+
+        comments.add(curr.getComment(CodeUnit.PLATE_COMMENT));
+        comments.add(curr.getComment(CodeUnit.PRE_COMMENT));
+        comments.add(curr.getComment(CodeUnit.EOL_COMMENT));
+        comments.add(curr.getComment(CodeUnit.POST_COMMENT));
+
+        comments.removeIf(item -> item == null);
+
+        return String.join("\n", comments);
     }
 
 }

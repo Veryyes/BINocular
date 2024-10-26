@@ -7,7 +7,7 @@ import os
 import tempfile
 import zipfile
 from urllib.request import urlopen
-from functools import lru_cache
+import io
 import logging
 import hashlib
 import json
@@ -16,6 +16,7 @@ import re
 import subprocess
 import struct
 import select
+import threading
 
 import requests
 import coloredlogs
@@ -55,7 +56,7 @@ class PipeRPC:
     FUNC_CALLEES = 32
     FUNC_XREFS = 34
     FUNC_BB = 36
-    BB_ADDR = 38
+    # BB_ADDR = 38
     BB_BRANCHES = 40
     BB_INSTR = 42
     # SECTIONS = 44
@@ -64,11 +65,12 @@ class PipeRPC:
     INSTR_PCODE = 50
     INSTR_COMMENT = 52
     STRINGS = 54
+    FUNC_IS_THUNK = 56
         
 
     # Requests will have no length. Size is known
     # Procedure ID | BasicBlock Address | Function Address
-    REQFMT = "!BQQ"
+    REQFMT = "!BQQQ"
 
     # Procedure ID | Total Length | Data... 
     RESFMT = "!BI"
@@ -86,8 +88,8 @@ class PipeRPC:
         os.mkfifo(self.send_pipe_path)
         os.mkfifo(self.recv_pipe_path)
         
-    def request(self, id:int, bb_addr:int=0, f_addr:int=0, timeout:int=60) -> bytes:
-        msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr)
+    def request(self, id:int, bb_addr:int=0, f_addr:int=0, instr_addr:int=0, timeout:int=60) -> bytes:
+        msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr, instr_addr)
         with open(self.send_pipe_path, 'wb') as fp:
             fp.write(msg)
             fp.flush()
@@ -361,17 +363,10 @@ class Ghidra(Disassembler):
 
     def clear(self):
         super().clear()
-        if self.decomp is not None:
-            self.decomp.closeProgram()
-        if self.save_on_close:
-            self.project.save(self.program)
 
-        self.project.close()
-        self.project = None
-        self.program = None
-        self.flat_api = None
+        # if self.save_on_close:
+        #     self.project.save(self.program)
 
-        os.unlink(self.pipe_path)
         if self.ghidra_proc is not None:
             try:
                 self.rpc_pipe.request(PipeRPC.QUIT)
@@ -381,6 +376,11 @@ class Ghidra(Disassembler):
                 self.ghidra_proc.kill()
                 logger.warn("Killed Ghidra Process. Took Too long")
 
+        os.removedirs(self.rpc_pipe.root_path)
+
+        if self.stdout_reader.is_alive:
+            self.stdout_reader.join()
+
     def get_sections(self) -> Iterable[Section]:
         '''
         Returns a list of the sections within the binary.
@@ -388,27 +388,24 @@ class Ghidra(Disassembler):
         '''
         sections = list()
 
-        blocks = self.program.getMemory().getBlocks()
-        for block in blocks:
-            sections.append(Section(
-                name=block.getName(),
-                type=str(block.getType()),
-                start=block.getStart().getOffset(),
-                offset=0,
-                size=block.getSize(),
-                entsize=0,
-                link=0,
-                info=0,
-                align=0,
-                write=block.isWrite(),
-                alloc=block.isRead(),
-                execute=block.isExecute()
-            ))
+        # blocks = self.program.getMemory().getBlocks()
+        # for block in blocks:
+        #     sections.append(Section(
+        #         name=block.getName(),
+        #         type=str(block.getType()),
+        #         start=block.getStart().getOffset(),
+        #         offset=0,
+        #         size=block.getSize(),
+        #         entsize=0,
+        #         link=0,
+        #         info=0,
+        #         align=0,
+        #         write=block.isWrite(),
+        #         alloc=block.isRead(),
+        #         execute=block.isExecute()
+        #     ))
 
         return sections
-
-    def _mk_addr(self, offset: int):
-        return self.program.getAddressFactory().getDefaultAddressSpace().getAddress(offset)
 
     def analyze(self, path) -> bool:
         '''
@@ -460,17 +457,28 @@ class Ghidra(Disassembler):
         )
 
         # If you wanna see java's stdout
-        import threading
         def getoutput(proc):
             for line in iter(proc.stdout.readline, b""):
-                print(str(line, 'utf8'),end='')
+                logger.info(str(line, 'utf8').strip())
 
-        x=threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        x.start()
-
+        self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
+        if self.verbose:
+            self.stdout_reader.start()
         
         return True, None
 
+    @staticmethod
+    def _unpack_str_list(raw:bytes) -> List[str]:
+        # Null terminated C Strings
+        strs = list()
+        start = 0
+        for i in range(len(raw)):
+            if raw[i] == 0:
+                strs.append(raw[start: i])
+                start = i+1
+
+        return [str(s, 'utf8') for s in strs]
+    
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''
         return str(self.rpc_pipe.request(PipeRPC.BINARY_NAME), 'utf8')
@@ -478,14 +486,6 @@ class Ghidra(Disassembler):
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
-        # from ghidra.program.model.symbol import SymbolType
-
-        # for ep_addr in self.st.getExternalEntryPointIterator():
-        #     sym = self.flat_api.getSymbolAt(ep_addr)
-        #     if sym.getSymbolType().equals(SymbolType.FUNCTION):
-        #         entry = self.fm.getFunctionAt(ep_addr)
-        #         if entry.callingConventionName == 'processEntry':
-        #             return ep_addr.getOffset()
         return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.ENTRY_POINT))[0]
 
     def get_architecture(self) -> str:
@@ -515,7 +515,7 @@ class Ghidra(Disassembler):
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
-        raise NotImplementedError
+        return self._unpack_str_list(self.rpc_pipe.request(PipeRPC.STRINGS))
 
     def get_dynamic_libs(self) -> Iterable[str]:
         '''Returns the list of names of the dynamic libraries used in this binary'''
@@ -529,7 +529,6 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
-
         # RPC returns back the address of each function
         # We will use the address to index/address/key each function
         raw = self.rpc_pipe.request(PipeRPC.FUNCS)
@@ -543,74 +542,45 @@ class Ghidra(Disassembler):
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return str(self.rpc_pipe.request(PipeRPC.FUNC_NAME), 'utf8')
-        # return func_ctxt.getName()
-
-    # @lru_cache
-    # def _decompile(self, func_ctxt: Any):
-    #     '''Return DecompileResult object. lru_cache'd because it's a little expensive'''
-    #     res = self.decomp.decompileFunction(
-    #         func_ctxt, self.decomp_timeout, self.monitor)
-    #     if not res.decompileCompleted():
-    #         logger.warn(
-    #             f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}")
-
-    #     return res
+        return str(self.rpc_pipe.request(PipeRPC.FUNC_NAME, f_addr=addr), 'utf8')
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
-        decomp_res = self._decompile(func_ctxt)
-        high_func = decomp_res.getHighFunction()
-        if high_func is None:
-            return list()
-
-        proto = high_func.getFunctionPrototype()
-
-        args = [
-            Argument(
-                data_type=str(proto.getParam(i).getDataType()),
-                var_name=str(proto.getParam(i).getName())
-            ) for i in range(proto.getNumParams())
-        ]
-
-        if func_ctxt.hasVarArgs():
-            args.append(Argument(data_type=None, var_name=None, var_args=True))
-
-        return args
+        args_str = self._unpack_str_list(self.rpc_pipe.request(PipeRPC.FUNC_ARGS, f_addr=addr))
+        return [Argument.from_literal(s) for s in args_str]
 
     def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
-        decomp_res = self._decompile(func_ctxt)
-        high_func = decomp_res.getHighFunction()
-        if high_func is None:
-            return ""
-        proto = high_func.getFunctionPrototype()
-
-        return str(proto.getReturnType())
+        return str(self.rpc_pipe.request(PipeRPC.FUNC_RETURN, f_addr=addr), 'utf8')
 
     def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
-        sf = func_ctxt.getStackFrame()
-        return sf.getFrameSize()
+        return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.FUNC_STACK_FRAME, f_addr=addr))[0]
 
     def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
-        vars = list()
-        for var in func_ctxt.getLocalVariables():
+        raw = self.rpc_pipe.request(PipeRPC.FUNC_VARS, f_addr=addr)
+        curr = 0
+        while(curr < len(raw)):
+            size = struct.unpack("!I", raw[curr:curr+4])
+            data = raw[curr+4 : curr+4+size]
+            dtype, name = self._unpack_str_list(data[:-6])
             v = Variable(
-                data_type=var.getDataType().getName(),
-                name=var.getName(),
-                is_register=var.isRegisterVariable(),
-                is_stack=var.isStackVariable(),
+                data_type=dtype,
+                name=name,
+                is_register=bool(data[-6]),
+                is_stack=bool(data[-5])
             )
             if v.is_stack:
-                v.stack_offset = var.getStackOffset()
-            vars.append(v)
-        return vars
+                v.stack_offset = struct.unpack("!I", data[-4:])[0]
+            
+            yield v
+
+            curr = curr+4+size
 
     def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
-        return func_ctxt.isThunk()
+        return bool(self.rpc_pipe.request(PipeRPC.FUNC_IS_THUNK, f_addr=addr)[0])
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
