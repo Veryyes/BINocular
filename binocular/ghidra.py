@@ -13,7 +13,6 @@ import shutil
 import re
 import subprocess
 import struct
-import select
 import threading
 import time
 from enum import Enum
@@ -31,9 +30,11 @@ from . import logger
 
 class PipeRPC:
     '''
+    A TCP Socket based RPC from the python Ghidra class to a Ghidra Script
     Type-Length-Value Style Protocol
     **NOT** Thread or Multiprocess Safe *LMAO!!*
     '''
+    
     class Command(Enum):
         QUIT = 0
         TEST = 2
@@ -111,7 +112,7 @@ class PipeRPC:
         self.sock.sendall(msg)
 
         header = b""
-        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE) #self.sock.recv(PipeRPC.RESFMT_SIZE)
+        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE)
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
         
         if res_id != id + 1:
@@ -336,7 +337,7 @@ class Ghidra(Disassembler):
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH()
         self.base_project_path = project_path
-
+        
         if home is None:
             ghidra_release_patttern = re.compile(r"ghidra_(\d+(\.\d+)*)_PUBLIC")
             ghidra_dir = None
@@ -353,6 +354,7 @@ class Ghidra(Disassembler):
         else:
             self.ghidra_home = home
 
+        self.ghidra_proc = None
         self.rpc_pipe = None
 
         self.save_on_close = save_on_close
@@ -366,18 +368,13 @@ class Ghidra(Disassembler):
         )
 
     def open(self):
-        # self.fifo_dir = tempfile.mkdtemp()
         return self
 
     def close(self):
         self.clear()
-        # os.rmdir(self.fifo_dir)
 
     def clear(self):
         super().clear()
-
-        # if self.save_on_close:
-        #     self.project.save(self.program)
 
         if self.ghidra_proc is not None:
             try:

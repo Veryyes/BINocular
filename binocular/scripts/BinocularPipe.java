@@ -249,9 +249,6 @@ public class BinocularPipe extends GhidraScript{
             out_buff.put(response);
 
         byte[] raw = out_buff.array();
-        // for (byte b: raw){
-        //     System.out.printf("%02X ", b);
-        // }
         out.write(raw, 0, raw.length);
         out.flush();
         
@@ -281,13 +278,7 @@ public class BinocularPipe extends GhidraScript{
                     this.basicBlockMap.put(addrWrap, bb);
                 }
             }
-            // if (bbAddr == 0x104000){
-            //     this.basicBlockMap.forEach((key, value) -> System.out.println(key + " " + value));
-            // }
         }   
-
-        // System.out.println(bbAddr);
-        // System.out.println(bb);
 
         switch(id){
             case TEST:
