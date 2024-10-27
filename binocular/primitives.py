@@ -163,7 +163,7 @@ class Reference(BaseModel):
         return hash((self.from_, self.to, self.type.value))
 
     def __repr__(self):
-        return f"{hex(self.from_)} -{self.type.name}-> {hex(self._to)}"
+        return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
 
     def orm(self):
         return ReferenceORM(
@@ -910,10 +910,10 @@ class Section(BaseModel):
     start: int
     offset: int
     size: int
-    entsize: int
-    link: int
-    info: int
-    align: int
+    entsize: int = 0
+    link: int = 0
+    info: int = 0
+    align: int = 0
 
     # flags
     write: bool = False

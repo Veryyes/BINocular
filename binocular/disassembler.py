@@ -99,7 +99,7 @@ class Disassembler(ABC):
         self.binary.strings |= set(
             self.get_strings(io_stream, len(self.binary)))
         io_stream.close()
-        
+
         self.functions = set()
 
         logger.info(
@@ -112,7 +112,7 @@ class Disassembler(ABC):
         for func_ctxt in self.get_func_iterator():
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
-
+            logger.info(f"Processing: {func_name}")
             f = NativeFunction(
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,

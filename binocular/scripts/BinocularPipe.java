@@ -61,6 +61,7 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.util.exception.CancelledException;
 import ghidra.program.model.mem.MemoryAccessException;
+import ghidra.program.model.mem.MemoryBlock;
 
 class BINVariable{
     public String type;
@@ -120,7 +121,7 @@ public class BinocularPipe extends GhidraScript{
     // final byte BB_ADDR = 38;
     final byte BB_BRANCHES = 40;
     final byte BB_INSTR = 42;
-    // final byte SECTIONS = 44;
+    final byte SECTIONS = 44;
     final byte DECOMP = 46;
     final byte FUNC_VARS = 48;
     final byte INSTR_PCODE = 50;
@@ -262,7 +263,13 @@ public class BinocularPipe extends GhidraScript{
                     this.basicBlockMap.put(addrWrap, bb);
                 }
             }
-        }
+            // if (bbAddr == 0x104000){
+            //     this.basicBlockMap.forEach((key, value) -> System.out.println(key + " " + value));
+            // }
+        }   
+
+        // System.out.println(bbAddr);
+        // System.out.println(bb);
 
         switch(id){
             case TEST:
@@ -319,6 +326,8 @@ public class BinocularPipe extends GhidraScript{
                 return this.packStringList(this.getStrings());
             case FUNC_IS_THUNK:
                 return f.isThunk() ? new byte[]{1} : new byte[]{0};
+            case SECTIONS:
+                return this.packSection(this.getSections());
             default:
                 return null;
         }
@@ -336,6 +345,38 @@ public class BinocularPipe extends GhidraScript{
         buf.order(ByteOrder.BIG_ENDIAN);
         buf.putInt(i);
         return buf.array();
+    }
+
+    private byte[] packSection(List<MemoryBlock> blks){
+        int total_length = 0;
+        LinkedList<byte[]> raw_list = new LinkedList<byte[]>();
+
+        for(MemoryBlock blk: blks){
+            total_length += 1 + blk.getName().getBytes().length;
+            total_length += 1 + blk.getType().toString().getBytes().length;
+            // Start, Length, RWX
+            total_length += 8 + 8 + 1;
+        }
+        ByteBuffer buf = ByteBuffer.allocate(total_length);
+        buf.order(ByteOrder.BIG_ENDIAN);
+
+        for(MemoryBlock blk: blks){
+            buf.put((byte)blk.getName().getBytes().length);
+            buf.put(blk.getName().getBytes());
+
+            buf.put((byte)blk.getType().toString().getBytes().length);
+            buf.put(blk.getType().toString().getBytes());
+            
+            buf.putLong(blk.getStart().getOffset());
+            buf.putLong(blk.getSize());
+
+            byte rwx = blk.isRead() ? (byte)4 : (byte) 0;
+            rwx |= blk.isWrite() ? (byte)2 : (byte) 0;
+            rwx |= blk.isExecute() ? (byte)1 : (byte) 0;
+            buf.put(rwx);
+        }
+        return buf.array();
+
     }
 
     private byte[] packStringList(List<String> list){
@@ -367,6 +408,8 @@ public class BinocularPipe extends GhidraScript{
         ByteBuffer buf = ByteBuffer.allocate(8 * list.size());
         buf.order(ByteOrder.BIG_ENDIAN);
         for (Function f: list){
+            // System.out.println(f.getEntryPoint().getOffset());
+            // System.out.printf("%02X ", f.getEntryPoint().getOffset());
             buf.putLong(f.getEntryPoint().getOffset());
         }
         return buf.array();
@@ -541,6 +584,15 @@ public class BinocularPipe extends GhidraScript{
         }
 
         return libs;
+    }
+
+    public List<MemoryBlock> getSections(){
+        LinkedList<MemoryBlock> blocks = new LinkedList<>();
+        MemoryBlock[] memBlocks = currentProgram.getMemory().getBlocks();
+        for (MemoryBlock blk: memBlocks){
+            blocks.add(blk);
+        }
+        return blocks;
     }
 
     public List<Function> getFunctionIterator(){

@@ -59,7 +59,7 @@ class PipeRPC:
     # BB_ADDR = 38
     BB_BRANCHES = 40
     BB_INSTR = 42
-    # SECTIONS = 44
+    SECTIONS = 44
     DECOMP = 46
     FUNC_VARS = 48
     INSTR_PCODE = 50
@@ -93,6 +93,8 @@ class PipeRPC:
         with open(self.send_pipe_path, 'wb') as fp:
             fp.write(msg)
             fp.flush()
+
+        # if ghidra dies. we hanging here 
 
         with open(self.recv_pipe_path, 'rb') as fp:
             rpipe_list, _, _ = select.select([fp], [], [], timeout)
@@ -370,42 +372,19 @@ class Ghidra(Disassembler):
         if self.ghidra_proc is not None:
             try:
                 self.rpc_pipe.request(PipeRPC.QUIT)
-                out, err = self.ghidra_proc.communicate()
-                print(out, err)
+                out, err = self.ghidra_proc.communicate(timeout=5)
+                if len(out) > 0:
+                    logger.info(str(out, 'utf8'))
+                if len(err) > 0:
+                    logger.warn(str(err, 'utf8'))
             except TimeoutError:
                 self.ghidra_proc.kill()
                 logger.warn("Killed Ghidra Process. Took Too long")
 
-        os.removedirs(self.rpc_pipe.root_path)
+        shutil.rmtree(self.rpc_pipe.root_path)
 
         if self.stdout_reader.is_alive:
             self.stdout_reader.join()
-
-    def get_sections(self) -> Iterable[Section]:
-        '''
-        Returns a list of the sections within the binary.
-        Currently only supports sections within an ELF file.
-        '''
-        sections = list()
-
-        # blocks = self.program.getMemory().getBlocks()
-        # for block in blocks:
-        #     sections.append(Section(
-        #         name=block.getName(),
-        #         type=str(block.getType()),
-        #         start=block.getStart().getOffset(),
-        #         offset=0,
-        #         size=block.getSize(),
-        #         entsize=0,
-        #         link=0,
-        #         info=0,
-        #         align=0,
-        #         write=block.isWrite(),
-        #         alloc=block.isRead(),
-        #         execute=block.isExecute()
-        #     ))
-
-        return sections
 
     def analyze(self, path) -> bool:
         '''
@@ -460,6 +439,7 @@ class Ghidra(Disassembler):
         def getoutput(proc):
             for line in iter(proc.stdout.readline, b""):
                 logger.info(str(line, 'utf8').strip())
+            logger.info("GHIDRA DONE")
 
         self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
         if self.verbose:
@@ -522,6 +502,36 @@ class Ghidra(Disassembler):
         raw = self.rpc_pipe.request(PipeRPC.DYN_LIBS)
         return [str(lib, 'utf8') for lib in raw.split(b"\x00")]
 
+    def get_sections(self) -> Iterable[Section]:
+        '''
+        Returns a list of the sections within the binary.
+        Currently only supports sections within an ELF file.
+        '''
+        raw = self.rpc_pipe.request(PipeRPC.SECTIONS)
+        i = 0
+        while i < len(raw):
+            name_len = raw[i]
+            name = raw[i+1: i+1+name_len]
+            i += 1 + name_len
+
+            type_len = raw[i]
+            type_ = raw[i+1: i+1+type_len]
+            i += 1 + type_len
+
+            start, size, rwx = struct.unpack("!QQB", raw[i:i+17])
+
+            yield Section(
+                name = str(name, 'utf8'),
+                type = str(type_, "utf8"),
+                start = start,
+                offset = 0,
+                size = size,
+                alloc = rwx & 4 != 0,
+                write = rwx & 2 != 0,
+                execute = rwx & 1 != 0
+            )
+            i += 17
+
     def get_func_iterator(self) -> Iterable[int]:
         '''
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data) 
@@ -532,8 +542,12 @@ class Ghidra(Disassembler):
         # RPC returns back the address of each function
         # We will use the address to index/address/key each function
         raw = self.rpc_pipe.request(PipeRPC.FUNCS)
-        for n in range(0, len(raw), 8):
-            yield struct.unpack("!Q", raw[n: n + 8])[0]
+        n_funcs = len(raw)//8
+
+        for i in range(n_funcs):
+            f = struct.unpack("!Q", raw[i*8:(i+1)*8])[0]
+            yield f
+
 
     def get_func_addr(self, func_ctxt: int) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
@@ -562,7 +576,7 @@ class Ghidra(Disassembler):
         raw = self.rpc_pipe.request(PipeRPC.FUNC_VARS, f_addr=addr)
         curr = 0
         while(curr < len(raw)):
-            size = struct.unpack("!I", raw[curr:curr+4])
+            size = struct.unpack("!I", raw[curr:curr+4])[0]
             data = raw[curr+4 : curr+4+size]
             dtype, name = self._unpack_str_list(data[:-6])
             v = Variable(
@@ -584,60 +598,32 @@ class Ghidra(Disassembler):
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
-        decomp_res = self._decompile(func_ctxt)
-        dfunc = decomp_res.getDecompiledFunction()
-        if dfunc is None:
-            return None
-
-        return dfunc.getC()
+        return str(self.rpc_pipe.request(PipeRPC.DECOMP, f_addr=addr), 'utf8')
 
     def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
-        refs = self.ref_m.getReferencesTo(self._mk_addr(addr))
-        for ref in refs:
-            if ref.getReferenceType().isCall():
-                call_addr = ref.getFromAddress()
-                caller = self.fm.getFunctionContaining(call_addr)
-                if caller is not None:
-                    yield caller.getEntryPoint().getOffset()
+        raw  = self.rpc_pipe.request(PipeRPC.FUNC_CALLERS, f_addr=addr)
+        num_funcs = len(raw) // 8
+        fmt = f"!{num_funcs}Q"
+        return struct.unpack(fmt, raw)
+
 
     def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
-        for addr in func_ctxt.getBody().getAddresses(True):
-            refs = self.ref_m.getReferencesFrom(addr)
-            for ref in refs:
-                if ref.getReferenceType().isCall():
-                    yield ref.getToAddress().getOffset()
-
-    def _parse_ref_type(self, type):
-        if type.isCall():
-            return RefType.CALL
-        if type.isJump():
-            return RefType.JUMP
-        if type.isRead():
-            return RefType.READ
-        if type.isWrite():
-            return RefType.WRITE
-
-        return RefType.UNKNOWN
+        raw  = self.rpc_pipe.request(PipeRPC.FUNC_CALLEES, f_addr=addr)
+        num_funcs = len(raw) // 8
+        fmt = f"!{num_funcs}Q"
+        return struct.unpack(fmt, raw)
 
     def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
-        for addr in func_ctxt.getBody().getAddresses(True):
-            from_refs = self.ref_m.getReferencesFrom(addr)
-            for ref in from_refs:
-                ref_type = ref.getReferenceType()
-                yield Reference(
-                    from_=ref.getFromAddress().getOffset(),
-                    to=ref.getToAddress().getOffset(),
-                    type=self._parse_ref_type(ref_type)
-                )
-
-            to_refs = self.ref_m.getReferencesTo(addr)
-            for ref in to_refs:
-                ref_type = ref.getReferenceType()
-                yield Reference(
-                    from_=ref.getFromAddress().getOffset(),
-                    to=ref.getToAddress().getOffset(),
-                    type=self._parse_ref_type(ref_type)
-                )
+        raw  = self.rpc_pipe.request(PipeRPC.FUNC_XREFS, f_addr=addr)
+        struct_size = 17
+        num_refs = len(raw) // struct_size
+        for i in range(num_refs):
+            type_, to, from_ = struct.unpack("!BQQ", raw[i*struct_size: (i+1)*struct_size])
+            yield Reference(
+                from_=from_,
+                type=RefType(type_),
+                to=to
+            )
 
     def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
         '''
@@ -646,76 +632,63 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
-        blocks = self.bb_model.getCodeBlocksContaining(
-            func_ctxt.getBody(), self.monitor)
-        history = set()
-
-        while (blocks.hasNext()):
-            bb = blocks.next()
-            bb_addr = bb.getFirstStartAddress().getOffset()
-
-            if bb_addr in history:
-                continue
-
-            history.add(bb_addr)
-            yield bb
+        raw  = self.rpc_pipe.request(PipeRPC.FUNC_BB, f_addr=addr)
+        num_funcs = len(raw) // 8
+        fmt = f"!{num_funcs}Q"
+        return struct.unpack(fmt, raw)
 
     def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
         '''
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        return bb_ctxt.getFirstStartAddress().getOffset()
+        return bb_ctxt
 
     def get_next_bbs(self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any) -> Iterable[Branch]:
         '''
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        dest_refs = bb_ctxt.getDestinations(self.monitor)
-        while (dest_refs.hasNext()):
-            dest = dest_refs.next()
-            if not self.fm.getFunctionAt(dest.getDestinationAddress()):
-                dest_addr = dest.getDestinationAddress().getOffset()
-                flow_type = dest.getFlowType()
-                if flow_type.hasFallthrough():
-                    yield Branch(type=BranchType.FalseBranch, target=dest_addr)
-                elif flow_type.isConditional():
-                    yield Branch(type=BranchType.TrueBranch, target=dest_addr)
-                elif flow_type.isUnConditional():
-                    yield Branch(type=BranchType.UnconditionalBranch, target=dest_addr)
-                elif flow_type.isComputed():
-                    yield Branch(type=BranchType.IndirectBranch, target=None)
+        raw  = self.rpc_pipe.request(PipeRPC.BB_BRANCHES, bb_addr=bb_addr)
+        struct_size = 9
+        n = len(raw) // struct_size
+        for i in range(n):
+            flow, addr = struct.unpack("!BQ", raw[i*struct_size: (i+1)*struct_size])
+            yield Branch(
+                type=BranchType(flow),
+                target=addr
+            )
 
     def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple(bytes, str)]:
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        instr = list()
+        raw  = self.rpc_pipe.request(PipeRPC.BB_INSTR, bb_addr=bb_addr)
+        
+        i = 0
+        while(i < len(raw)):
+            instr_size = raw[i]
+            i += 1
 
-        curr_instr = self.listing.getInstructionAt(
-            bb_ctxt.getFirstStartAddress())
-        while (curr_instr is not None and bb_ctxt.contains(curr_instr.getAddress())):
-            instr.append((bytes(curr_instr.getBytes()),
-                         curr_instr.getMnemonicString()))
-            curr_instr = curr_instr.getNext()
+            if instr_size > 0:
+                instr_bytes = raw[i:i+instr_size]
+            else:
+                instr_bytes = b""
+            i += instr_size
 
-        return instr
+            mnemonic_size = raw[i]
+            i += 1
+            mnemonic = raw[i: i+mnemonic_size]
+
+            yield (instr_bytes, str(mnemonic, 'utf8'))
+            i += mnemonic_size 
+
 
     def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> Optional[IR]:
         '''
         Returns the Intermediate Representation data based on the instruction given
         '''
-        curr_instr = self.listing.getInstructionAt(self._mk_addr(instr_addr))
-        pcodes = [str(p) for p in curr_instr.getPcode()]
-        return IR(lang_name=IL.PCODE, data=";".join([p for p in pcodes]))
+        pcode = str(self.rpc_pipe.request(PipeRPC.INSTR_PCODE, instr_addr=instr_addr), "utf8")
+        return IR(lang_name=IL.PCODE, data=pcode)
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
-        from ghidra.program.model.listing import CodeUnit
-        curr_instr = self.listing.getInstructionAt(self._mk_addr(instr_addr))
-        comments = list()
-        comments.append(curr_instr.getComment(CodeUnit.PLATE_COMMENT))
-        comments.append(curr_instr.getComment(CodeUnit.PRE_COMMENT))
-        comments.append(curr_instr.getComment(CodeUnit.EOL_COMMENT))
-        comments.append(curr_instr.getComment(CodeUnit.POST_COMMENT))
-
-        return "\n".join([c for c in comments if c is not None])
+        return str(self.rpc_pipe.request(PipeRPC.INSTR_COMMENT, instr_addr=instr_addr), "utf8")
