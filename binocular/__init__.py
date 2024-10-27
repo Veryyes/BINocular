@@ -1,3 +1,9 @@
+import coloredlogs
+import logging
+logger = logging.getLogger("BINocular")
+logger.addHandler(logging.FileHandler("logs.txt"))
+coloredlogs.install(
+    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 from .primitives import (
     Argument,

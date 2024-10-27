@@ -8,17 +8,12 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any, Optional, Tuple, List, Dict, Set, IO
 
-import coloredlogs
 
 from .primitives import (BasicBlock, Binary, NativeFunction, SourceFunction,
                          Instruction, Section, Argument, Branch, IR, Reference, Variable)
 
 from .consts import Endian
-
-logger = logging.getLogger(__name__)
-coloredlogs.install(
-    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
-
+from . import logger
 
 class Disassembler(ABC):
     '''
@@ -110,6 +105,7 @@ class Disassembler(ABC):
 
         count = 0
         for func_ctxt in self.get_func_iterator():
+            start = time.time()
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
             logger.info(f"Processing: {func_name}")
@@ -168,6 +164,8 @@ class Disassembler(ABC):
             elif not f.thunk:
                 logger.warn(
                     f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
+
+            logger.info(f"Analysis Pass 1 - {func_name}: {time.time()-start:.2f}s")
 
         # 2nd pass to do callee/callers
         for func_ctxt in self.get_func_iterator():

@@ -8,6 +8,8 @@
 //Makes functions out of a run of selected ARM or Thumb function pointers 
 //@category BINocular
 
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -16,6 +18,7 @@ import java.util.HashSet;
 import java.nio.file.Paths;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.io.IOException;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -158,9 +161,8 @@ public class BinocularPipe extends GhidraScript{
     @Override
     public void run() throws Exception{
         String[] args = this.getScriptArgs();
-        String rootPipePath = args[0];
-        String recvPath = Paths.get(rootPipePath, "send").toString();
-        String sendPath = Paths.get(rootPipePath, "recv").toString();
+        String ip = args[0];
+        int port = Integer.parseInt(args[1]);
 
         this.st = currentProgram.getSymbolTable();
         this.fm = currentProgram.getFunctionManager();
@@ -173,72 +175,88 @@ public class BinocularPipe extends GhidraScript{
         decomp.openProgram(currentProgram);
 
         boolean running = true;
-        while (running){
-            int id;
-            long bbAddr = 0;
-            long funcAddr = 0;
-            long instrAddr = 0;
-            byte[] buff = new byte[8];
-            byte[] response;
-            int res_size = 0;
-
-            try(BufferedInputStream rpipe = new BufferedInputStream(new FileInputStream(new File(recvPath)))){
-                while(rpipe.available() == 0){
-                    // Waiting for Data
-                    Thread.sleep(100);
-                }
-                // System.out.println("Got Request!");
-
-                // Add some sort of timeout
-                id = rpipe.read();
-                if (id == QUIT){
-                    running = false;
-                }
-
-                rpipe.read(buff, 0, 8);
-                bbAddr = ByteBuffer.wrap(buff).getLong();
-
-                rpipe.read(buff, 0, 8);
-                funcAddr = ByteBuffer.wrap(buff).getLong();
-
-                rpipe.read(buff, 0, 8);
-                instrAddr = ByteBuffer.wrap(buff).getLong();
-            }
-            boolean error = false;
+        try (ServerSocket server = new ServerSocket(port)){
+            Socket client = server.accept();
+            BufferedInputStream in = new BufferedInputStream(client.getInputStream());
+            BufferedOutputStream out = new BufferedOutputStream(client.getOutputStream());
             try{
-                response = this.handleCommand(id, bbAddr, funcAddr, instrAddr);
-            }catch (CancelledException e){
-                error = true;
-                response = e.toString().getBytes();
+                while (running){
+                    running = this.handleClient(in, out);
+                }
+            }catch(IOException e){
+                running = false;
+                System.out.println("IOException has occurred handling a client: " + e.toString());
+            }finally{
+                in.close();
+                out.close();
+                client.close();
             }
             
-            if (response == null){
-                res_size = 0;
-            }else{
-                res_size = response.length;
-            }
-
-            try(BufferedOutputStream wpipe = new BufferedOutputStream(new FileOutputStream(new File(sendPath)))){
-                ByteBuffer out_buff = ByteBuffer.allocate(res_size + 5);
-                out_buff.order(ByteOrder.BIG_ENDIAN);
-                if (error){
-                    out_buff.put(ERROR);    
-                }else{
-                    out_buff.put((byte)(id+1));
-                }
-                out_buff.putInt(res_size);
-                if (res_size > 0)
-                    out_buff.put(response);
-
-                byte[] raw = out_buff.array();
-                // for (byte b: raw){
-                //     System.out.printf("%02X ", b);
-                // }
-                wpipe.write(raw, 0, raw.length);
-                wpipe.flush();
-            }
-
         }
+
+    }
+
+    private boolean handleClient(BufferedInputStream in, BufferedOutputStream out) throws IOException{
+        int id;
+        long bbAddr = 0;
+        long funcAddr = 0;
+        long instrAddr = 0;
+        byte[] buff = new byte[8];
+        byte[] response;
+        int res_size = 0;
+        boolean running = true;
+
+        id = in.read();
+        if (id == QUIT){
+            running = false;
+        }
+
+
+        in.read(buff, 0, 8);
+        bbAddr = ByteBuffer.wrap(buff).getLong();
+
+        in.read(buff, 0, 8);
+        funcAddr = ByteBuffer.wrap(buff).getLong();
+
+        in.read(buff, 0, 8);
+        instrAddr = ByteBuffer.wrap(buff).getLong();
+    
+
+        boolean error = false;
+        try{
+            response = this.handleCommand(id, bbAddr, funcAddr, instrAddr);
+        }catch (CancelledException e){
+            error = true;
+            response = e.toString().getBytes();
+        }
+        
+        if (response == null){
+            res_size = 0;
+        }else{
+            res_size = response.length;
+        }
+
+
+        ByteBuffer out_buff = ByteBuffer.allocate(res_size + 5);
+        out_buff.order(ByteOrder.BIG_ENDIAN);
+        if (error){
+            out_buff.put(ERROR);    
+        }else{
+            out_buff.put((byte)(id+1));
+        }
+        out_buff.putInt(res_size);
+        if (res_size > 0)
+            out_buff.put(response);
+
+        byte[] raw = out_buff.array();
+        // for (byte b: raw){
+        //     System.out.printf("%02X ", b);
+        // }
+        out.write(raw, 0, raw.length);
+        out.flush();
+        
+
+        return running;
     }
 
     private byte[] handleCommand(int id, long bbAddr, long funcAddr, long instrAddr) throws CancelledException{

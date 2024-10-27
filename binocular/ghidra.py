@@ -7,8 +7,6 @@ import os
 import tempfile
 import zipfile
 from urllib.request import urlopen
-import io
-import logging
 import hashlib
 import json
 import shutil
@@ -17,9 +15,11 @@ import subprocess
 import struct
 import select
 import threading
+import time
+from enum import Enum
+import socket
 
 import requests
-import coloredlogs
 from git import Repo
 import git
 
@@ -27,45 +27,43 @@ from .disassembler import Disassembler
 from .primitives import Section, Instruction, IR, Argument, Branch, Reference, Variable
 from .consts import Endian, IL, BranchType, RefType
 from .utils import run_proc
-
-logger = logging.getLogger(__name__)
-coloredlogs.install(
-    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+from . import logger
 
 class PipeRPC:
     '''
     Type-Length-Value Style Protocol
     **NOT** Thread or Multiprocess Safe *LMAO!!*
     '''
-    QUIT = 0
-    TEST = 2
-    BINARY_NAME = 4
-    ENTRY_POINT = 6
-    ARCHITECTURE = 8
-    ENDIANNESS = 10
-    BITNESS = 12
-    BASE_ADDR = 14
-    DYN_LIBS = 16
-    FUNCS = 18
-    # FUNC_ADDR = 20
-    FUNC_NAME = 22
-    FUNC_ARGS = 24
-    FUNC_RETURN = 26
-    FUNC_STACK_FRAME = 28
-    FUNC_CALLERS = 30
-    FUNC_CALLEES = 32
-    FUNC_XREFS = 34
-    FUNC_BB = 36
-    # BB_ADDR = 38
-    BB_BRANCHES = 40
-    BB_INSTR = 42
-    SECTIONS = 44
-    DECOMP = 46
-    FUNC_VARS = 48
-    INSTR_PCODE = 50
-    INSTR_COMMENT = 52
-    STRINGS = 54
-    FUNC_IS_THUNK = 56
+    class Command(Enum):
+        QUIT = 0
+        TEST = 2
+        BINARY_NAME = 4
+        ENTRY_POINT = 6
+        ARCHITECTURE = 8
+        ENDIANNESS = 10
+        BITNESS = 12
+        BASE_ADDR = 14
+        DYN_LIBS = 16
+        FUNCS = 18
+        # FUNC_ADDR = 20
+        FUNC_NAME = 22
+        FUNC_ARGS = 24
+        FUNC_RETURN = 26
+        FUNC_STACK_FRAME = 28
+        FUNC_CALLERS = 30
+        FUNC_CALLEES = 32
+        FUNC_XREFS = 34
+        FUNC_BB = 36
+        # BB_ADDR = 38
+        BB_BRANCHES = 40
+        BB_INSTR = 42
+        SECTIONS = 44
+        DECOMP = 46
+        FUNC_VARS = 48
+        INSTR_PCODE = 50
+        INSTR_COMMENT = 52
+        STRINGS = 54
+        FUNC_IS_THUNK = 56
         
 
     # Requests will have no length. Size is known
@@ -74,45 +72,68 @@ class PipeRPC:
 
     # Procedure ID | Total Length | Data... 
     RESFMT = "!BI"
+    RESFMT_SIZE = struct.calcsize(RESFMT)
 
-    def __init__(self, path:str):
-        self.root_path = path
-        os.makedirs(self.root_path, exist_ok=False)
-        
-        self.send_pipe_path = os.path.join(self.root_path, "send")
-        self.recv_pipe_path = os.path.join(self.root_path, "recv")
-        
-        if os.path.exists(self.send_pipe_path) or os.path.exists(self.recv_pipe_path):
-            raise Exception(f"Send or Recv pipe exists already: {self.root_path}")
+    def __init__(self, gscript_ip:str="127.0.0.1", port:int=7331):
+        self.gscript_ip = gscript_ip
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.is_connected = False
 
-        os.mkfifo(self.send_pipe_path)
-        os.mkfifo(self.recv_pipe_path)
-        
-    def request(self, id:int, bb_addr:int=0, f_addr:int=0, instr_addr:int=0, timeout:int=60) -> bytes:
+    def connect(self, timeout:int=30):
+        waited = 0.0
+        while not self.is_connected:
+            try:
+                self.sock.connect((self.gscript_ip, self.port))
+                self.is_connected = True
+                logger.info(f"Socket Connect to BINocular Ghidra Script {self.gscript_ip}:{self.port}")
+                return
+            except ConnectionRefusedError:
+                time.sleep(.25)
+                waited += .25
+
+            if waited > timeout:
+                raise ConnectionRefusedError("Unable to Connect to BINocular Ghidra Script")
+
+        self.is_connected = False    
+
+    def close(self):
+        self.sock.close()
+        self.is_connected = False
+
+    def request(self, cmd:Command, bb_addr:int=0, f_addr:int=0, instr_addr:int=0, timeout:int=60) -> bytes:
+        if not self.is_connected:
+            self.connect()
+
+        id = cmd.value
         msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr, instr_addr)
-        with open(self.send_pipe_path, 'wb') as fp:
-            fp.write(msg)
-            fp.flush()
 
-        # if ghidra dies. we hanging here 
+        self.sock.sendall(msg)
 
-        with open(self.recv_pipe_path, 'rb') as fp:
-            rpipe_list, _, _ = select.select([fp], [], [], timeout)
-            
-            if len(rpipe_list) == 0:
-                raise Exception("Timeout")
+        header = b""
+        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE) #self.sock.recv(PipeRPC.RESFMT_SIZE)
+        res_id, size = struct.unpack(PipeRPC.RESFMT, header)
+        
+        if res_id != id + 1:
+            raise Exception(f"Recieved unexpected response id: {res_id}, Expected: {id+1}")
 
-            res_id, size = struct.unpack(PipeRPC.RESFMT, fp.read(5))
-            assert res_id == id + 1
+        if size < 0:
+            raise Exception(f"Recieved negative lengthed response")
 
-            if size < 0:
-                raise Exception("Size cannot be negative")
-
-            if size > 0:
-                return fp.read(size)
+        if size > 0:
+            return self._recv_bytes(self.sock, size, timeout=300)
 
         return b""
 
+    def _recv_bytes(self, sock:socket.socket, size:int, timeout:int=60):
+        data = b""
+        start = time.time()
+        while len(data) < size:
+            data +=  sock.recv(min(size - len(data), 4096))
+            if time.time() - start > timeout:
+                raise TimeoutError
+
+        return data
 
 class Ghidra(Disassembler):
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
@@ -281,13 +302,6 @@ class Ghidra(Disassembler):
                 fpath = os.path.join(root, fname)
                 os.chmod(fpath, 0o775)
 
-        try:
-            launcher = pyhidra.HeadlessPyhidraLauncher(install_dir=ghidra_home)
-            launcher.start()
-        except ValueError:
-            logger.warn(
-                f"Unable to install Pyhidra Plugin. Minimum Ghidra version required is 10.3.\nTL;DR Ghidra {version} is installed, but won't be useable for Binocular")
-
         return ghidra_home
 
     @classmethod
@@ -312,10 +326,6 @@ class Ghidra(Disassembler):
     def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
 
-        self.project = None
-        self.program = None
-        self.flat_api = None
-        self.decomp = None
         self.jvm_args = jvm_args
         if self.jvm_args is None:
             self.jvm_args = list()
@@ -356,12 +366,12 @@ class Ghidra(Disassembler):
         )
 
     def open(self):
-        self.fifo_dir = tempfile.mkdtemp()
+        # self.fifo_dir = tempfile.mkdtemp()
         return self
 
     def close(self):
         self.clear()
-        os.rmdir(self.fifo_dir)
+        # os.rmdir(self.fifo_dir)
 
     def clear(self):
         super().clear()
@@ -371,7 +381,7 @@ class Ghidra(Disassembler):
 
         if self.ghidra_proc is not None:
             try:
-                self.rpc_pipe.request(PipeRPC.QUIT)
+                self.rpc_pipe.request(PipeRPC.Command.QUIT)
                 out, err = self.ghidra_proc.communicate(timeout=5)
                 if len(out) > 0:
                     logger.info(str(out, 'utf8'))
@@ -380,8 +390,6 @@ class Ghidra(Disassembler):
             except TimeoutError:
                 self.ghidra_proc.kill()
                 logger.warn("Killed Ghidra Process. Took Too long")
-
-        shutil.rmtree(self.rpc_pipe.root_path)
 
         if self.stdout_reader.is_alive:
             self.stdout_reader.join()
@@ -407,8 +415,7 @@ class Ghidra(Disassembler):
             os.makedirs(self.project_location, exist_ok=True)
             cmd += [self.project_location, self.project_name]
 
-        self.rpc_pipe = PipeRPC(os.path.join(self.fifo_dir, self.project_name))
-        
+        self.rpc_pipe = PipeRPC()
 
         # Import a new File into Ghidra
         # if we already imported it, this will fail and nothing bad happens
@@ -426,7 +433,7 @@ class Ghidra(Disassembler):
         cmd += [
             "-process", os.path.basename(path),
             "-scriptPath", Ghidra.SCRIPT_PATH(),
-            "-postScript", "BinocularPipe.java", self.rpc_pipe.root_path
+            "-postScript", "BinocularPipe.java", self.rpc_pipe.gscript_ip, str(self.rpc_pipe.port)
         ]
         # print(" ".join(cmd))
         self.ghidra_proc = subprocess.Popen(
@@ -461,12 +468,12 @@ class Ghidra(Disassembler):
     
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''
-        return str(self.rpc_pipe.request(PipeRPC.BINARY_NAME), 'utf8')
+        return str(self.rpc_pipe.request(PipeRPC.Command.BINARY_NAME), 'utf8')
 
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
-        return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.ENTRY_POINT))[0]
+        return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.Command.ENTRY_POINT))[0]
 
     def get_architecture(self) -> str:
         '''
@@ -474,11 +481,11 @@ class Ghidra(Disassembler):
         For best compatibility use either archinfo, qemu, or compilation triplet naming conventions.
         https://github.com/angr/archinfo
         '''
-        return str(self.rpc_pipe.request(PipeRPC.ARCHITECTURE), 'utf8')
+        return str(self.rpc_pipe.request(PipeRPC.Command.ARCHITECTURE), 'utf8')
 
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
-        endian = str(self.rpc_pipe.request(PipeRPC.ARCHITECTURE), 'utf8').lower()
+        endian = str(self.rpc_pipe.request(PipeRPC.Command.ARCHITECTURE), 'utf8').lower()
         if endian == 'little':
             return Endian.LITTLE
         elif endian == 'big':
@@ -487,19 +494,19 @@ class Ghidra(Disassembler):
 
     def get_bitness(self) -> int:
         '''Returns the word size of the architecture (e.g., 16, 32, 64)'''
-        return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.BITNESS))[0]
+        return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.Command.BITNESS))[0]
 
     def get_base_address(self) -> int:
         '''Returns the base address the binary is based at'''
-        return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.BASE_ADDR))[0]
+        return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.Command.BASE_ADDR))[0]
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         '''Returns the list of defined strings in the binary'''
-        return self._unpack_str_list(self.rpc_pipe.request(PipeRPC.STRINGS))
+        return self._unpack_str_list(self.rpc_pipe.request(PipeRPC.Command.STRINGS))
 
     def get_dynamic_libs(self) -> Iterable[str]:
         '''Returns the list of names of the dynamic libraries used in this binary'''
-        raw = self.rpc_pipe.request(PipeRPC.DYN_LIBS)
+        raw = self.rpc_pipe.request(PipeRPC.Command.DYN_LIBS)
         return [str(lib, 'utf8') for lib in raw.split(b"\x00")]
 
     def get_sections(self) -> Iterable[Section]:
@@ -507,7 +514,7 @@ class Ghidra(Disassembler):
         Returns a list of the sections within the binary.
         Currently only supports sections within an ELF file.
         '''
-        raw = self.rpc_pipe.request(PipeRPC.SECTIONS)
+        raw = self.rpc_pipe.request(PipeRPC.Command.SECTIONS)
         i = 0
         while i < len(raw):
             name_len = raw[i]
@@ -541,7 +548,7 @@ class Ghidra(Disassembler):
         '''
         # RPC returns back the address of each function
         # We will use the address to index/address/key each function
-        raw = self.rpc_pipe.request(PipeRPC.FUNCS)
+        raw = self.rpc_pipe.request(PipeRPC.Command.FUNCS)
         n_funcs = len(raw)//8
 
         for i in range(n_funcs):
@@ -556,24 +563,24 @@ class Ghidra(Disassembler):
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return str(self.rpc_pipe.request(PipeRPC.FUNC_NAME, f_addr=addr), 'utf8')
+        return str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
-        args_str = self._unpack_str_list(self.rpc_pipe.request(PipeRPC.FUNC_ARGS, f_addr=addr))
+        args_str = self._unpack_str_list(self.rpc_pipe.request(PipeRPC.Command.FUNC_ARGS, f_addr=addr))
         return [Argument.from_literal(s) for s in args_str]
 
     def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return str(self.rpc_pipe.request(PipeRPC.FUNC_RETURN, f_addr=addr), 'utf8')
+        return str(self.rpc_pipe.request(PipeRPC.Command.FUNC_RETURN, f_addr=addr), 'utf8')
 
     def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
-        return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.FUNC_STACK_FRAME, f_addr=addr))[0]
+        return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.Command.FUNC_STACK_FRAME, f_addr=addr))[0]
 
     def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
-        raw = self.rpc_pipe.request(PipeRPC.FUNC_VARS, f_addr=addr)
+        raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_VARS, f_addr=addr)
         curr = 0
         while(curr < len(raw)):
             size = struct.unpack("!I", raw[curr:curr+4])[0]
@@ -594,27 +601,27 @@ class Ghidra(Disassembler):
 
     def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
-        return bool(self.rpc_pipe.request(PipeRPC.FUNC_IS_THUNK, f_addr=addr)[0])
+        return bool(self.rpc_pipe.request(PipeRPC.Command.FUNC_IS_THUNK, f_addr=addr)[0])
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return str(self.rpc_pipe.request(PipeRPC.DECOMP, f_addr=addr), 'utf8')
+        return str(self.rpc_pipe.request(PipeRPC.Command.DECOMP, f_addr=addr), 'utf8')
 
     def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
-        raw  = self.rpc_pipe.request(PipeRPC.FUNC_CALLERS, f_addr=addr)
+        raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_CALLERS, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
 
     def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
-        raw  = self.rpc_pipe.request(PipeRPC.FUNC_CALLEES, f_addr=addr)
+        raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_CALLEES, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
     def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
-        raw  = self.rpc_pipe.request(PipeRPC.FUNC_XREFS, f_addr=addr)
+        raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_XREFS, f_addr=addr)
         struct_size = 17
         num_refs = len(raw) // struct_size
         for i in range(num_refs):
@@ -632,7 +639,7 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
-        raw  = self.rpc_pipe.request(PipeRPC.FUNC_BB, f_addr=addr)
+        raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_BB, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
@@ -647,7 +654,7 @@ class Ghidra(Disassembler):
         '''
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        raw  = self.rpc_pipe.request(PipeRPC.BB_BRANCHES, bb_addr=bb_addr)
+        raw  = self.rpc_pipe.request(PipeRPC.Command.BB_BRANCHES, bb_addr=bb_addr)
         struct_size = 9
         n = len(raw) // struct_size
         for i in range(n):
@@ -661,7 +668,7 @@ class Ghidra(Disassembler):
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
-        raw  = self.rpc_pipe.request(PipeRPC.BB_INSTR, bb_addr=bb_addr)
+        raw  = self.rpc_pipe.request(PipeRPC.Command.BB_INSTR, bb_addr=bb_addr)
         
         i = 0
         while(i < len(raw)):
@@ -686,9 +693,9 @@ class Ghidra(Disassembler):
         '''
         Returns the Intermediate Representation data based on the instruction given
         '''
-        pcode = str(self.rpc_pipe.request(PipeRPC.INSTR_PCODE, instr_addr=instr_addr), "utf8")
+        pcode = str(self.rpc_pipe.request(PipeRPC.Command.INSTR_PCODE, instr_addr=instr_addr), "utf8")
         return IR(lang_name=IL.PCODE, data=pcode)
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
-        return str(self.rpc_pipe.request(PipeRPC.INSTR_COMMENT, instr_addr=instr_addr), "utf8")
+        return str(self.rpc_pipe.request(PipeRPC.Command.INSTR_COMMENT, instr_addr=instr_addr), "utf8")
