@@ -34,7 +34,7 @@ class PipeRPC:
     Type-Length-Value Style Protocol
     **NOT** Thread or Multiprocess Safe *LMAO!!*
     '''
-    
+
     class Command(Enum):
         QUIT = 0
         TEST = 2
@@ -383,10 +383,10 @@ class Ghidra(Disassembler):
                 if len(out) > 0:
                     logger.info(str(out, 'utf8'))
                 if len(err) > 0:
-                    logger.warn(str(err, 'utf8'))
+                    logger.warning(str(err, 'utf8'))
             except TimeoutError:
                 self.ghidra_proc.kill()
-                logger.warn("Killed Ghidra Process. Took Too long")
+                logger.warning("Killed Ghidra Process. Took Too long")
 
         if self.stdout_reader.is_alive:
             self.stdout_reader.join()

@@ -691,7 +691,7 @@ public class BinocularPipe extends GhidraScript{
         return dFunc.getC();
     }
 
-    public List<Function> getFunctionCallees(Function f){
+    public List<Function> getFunctionCallers(Function f){
         LinkedList<Function> list = new LinkedList<>();
         for (Reference ref: rm.getReferencesTo(f.getEntryPoint())){
             if (ref.getReferenceType().isCall()){
@@ -704,7 +704,7 @@ public class BinocularPipe extends GhidraScript{
         return list;
     }
 
-    public List<Function> getFunctionCallers(Function f){
+    public List<Function> getFunctionCallees(Function f){
         LinkedList<Function> list = new LinkedList<>();
         for(Address addr: f.getBody().getAddresses(true)){
             for(Reference ref: rm.getReferencesFrom(addr)){
@@ -719,10 +719,19 @@ public class BinocularPipe extends GhidraScript{
     public List<Reference> getFunctionXRefs(Function f){
         LinkedList<Reference> refs = new LinkedList<>();
         for(Address addr: f.getBody().getAddresses(true)){
+            // For now, Skip stack refs because when
+            // You query their address, it just returns
+            // the relative offset from the top of the stack
             for(Reference r: rm.getReferencesFrom(addr)){
+                if (r.getToAddress().isStackAddress())
+                    continue;
+
                 refs.add(r);
             }
             for(Reference r: rm.getReferencesTo(addr)){
+                if (r.getFromAddress().isStackAddress())
+                    continue;
+
                 refs.add(r);
             }
         }
