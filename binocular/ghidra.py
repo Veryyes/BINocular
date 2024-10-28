@@ -82,6 +82,7 @@ class PipeRPC:
         self.is_connected = False
 
     def connect(self, timeout:int=30):
+        logger.info(f"Attempting to Connect to: {self.gscript_ip}:{self.port}")
         waited = 0.0
         while not self.is_connected:
             try:
@@ -104,6 +105,9 @@ class PipeRPC:
 
     def request(self, cmd:Command, bb_addr:int=0, f_addr:int=0, instr_addr:int=0, timeout:int=60) -> bytes:
         if not self.is_connected:
+            if cmd == PipeRPC.Command.QUIT:
+                return
+                
             self.connect()
 
         id = cmd.value
@@ -379,17 +383,20 @@ class Ghidra(Disassembler):
         if self.ghidra_proc is not None:
             try:
                 self.rpc_pipe.request(PipeRPC.Command.QUIT)
+                self.rpc_pipe.close()
                 out, err = self.ghidra_proc.communicate(timeout=5)
-                if len(out) > 0:
-                    logger.info(str(out, 'utf8'))
-                if len(err) > 0:
-                    logger.warning(str(err, 'utf8'))
+                if self.verbose:
+                    if len(out) > 0:
+                        logger.info(str(out, 'utf8'))
+                    if len(err) > 0:
+                        logger.warning(str(err, 'utf8'))
+                
             except TimeoutError:
                 self.ghidra_proc.kill()
                 logger.warning("Killed Ghidra Process. Took Too long")
 
-        if self.stdout_reader.is_alive:
-            self.stdout_reader.join()
+        # if self.stdout_reader.is_alive:
+        #     self.stdout_reader.join()
 
     def analyze(self, path) -> bool:
         '''
@@ -440,14 +447,14 @@ class Ghidra(Disassembler):
         )
 
         # If you wanna see java's stdout
-        def getoutput(proc):
-            for line in iter(proc.stdout.readline, b""):
-                logger.info(str(line, 'utf8').strip())
-            logger.info("GHIDRA DONE")
+        # def getoutput(proc):
+        #     for line in iter(proc.stdout.readline, b""):
+        #         logger.info(str(line, 'utf8').strip())
+        #     logger.info("GHIDRA DONE")
 
-        self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        if self.verbose:
-            self.stdout_reader.start()
+        # self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
+        # if self.verbose:
+        #     self.stdout_reader.start()
         
         return True, None
 
