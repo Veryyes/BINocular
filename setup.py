@@ -30,5 +30,8 @@ setup(
     },
     entry_points={
         "console_scripts": ['binocular = binocular.run:main']
+    },
+    package_data={
+        'binocular': ['scripts/*']
     }
 )
