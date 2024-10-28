@@ -10,7 +10,6 @@ import pkgutil
 import binascii
 import requests
 import json
-import logging
 import tempfile
 import lzma
 import tarfile
@@ -20,15 +19,11 @@ from .disassembler import Disassembler
 from .primitives import Section, Instruction, IR, Branch, Argument, Reference, RefType, Variable
 from .consts import Endian, BranchType, IL
 from .utils import run_proc
+from . import logger
 
 from git import Repo
 import git
 import rzpipe
-import coloredlogs
-
-logger = logging.getLogger(__name__)
-coloredlogs.install(
-    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 
 class Rizin(Disassembler):

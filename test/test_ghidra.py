@@ -1,13 +1,9 @@
+import os
 import itertools
 import tempfile
 from urllib.request import urlopen
 
 from binocular import Ghidra, Binary
-
-# Necessary for testing
-# on close(), jpype's JVM shutdown is called and 
-# the JVM in this python process cannot be launched again 
-Ghidra._DONT_SHUTDOWN_JVM = True
 
 def test_install_release():
     with tempfile.TemporaryDirectory() as tmpdirname:
@@ -17,13 +13,16 @@ def test_install_release():
 
 def test_install_local():
     url = 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.2_build/ghidra_11.2_PUBLIC_20240926.zip'
-    with tempfile.TemporaryFile() as fp:
-        fp.write(urlopen(url).read())
+    tmp_file = "/tmp/binocular_temp_test_file.bin"
+    with open(tmp_file, 'wb') as f:
+        f.write(urlopen(url).read())
 
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            assert not Ghidra.is_installed(install_dir=tmpdirname)
-            Ghidra.install(install_dir=tmpdirname, local_install_file=fp.name)
-            assert Ghidra.is_installed(install_dir=tmpdirname)
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not Ghidra.is_installed(install_dir=tmpdirname)
+        Ghidra.install(install_dir=tmpdirname, local_install_file=tmp_file)
+        assert Ghidra.is_installed(install_dir=tmpdirname)
+
+    os.unlink(tmp_file)
         
 
 def test_build_commit():

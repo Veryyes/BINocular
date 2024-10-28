@@ -8,17 +8,12 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any, Optional, Tuple, List, Dict, Set, IO
 
-import coloredlogs
 
 from .primitives import (BasicBlock, Binary, NativeFunction, SourceFunction,
                          Instruction, Section, Argument, Branch, IR, Reference, Variable)
 
 from .consts import Endian
-
-logger = logging.getLogger(__name__)
-coloredlogs.install(
-    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
-
+from . import logger
 
 class Disassembler(ABC):
     '''
@@ -41,6 +36,8 @@ class Disassembler(ABC):
         self._func_addrs: Dict[int, NativeFunction] = dict()
         self._bbs: Dict[int, BasicBlock] = dict()
         self._instrs: Dict[int, Instruction] = dict()
+        self.binary = None
+        self.functions = list()
 
     def __enter__(self):
         return self.open()
@@ -108,9 +105,10 @@ class Disassembler(ABC):
 
         count = 0
         for func_ctxt in self.get_func_iterator():
+            start = time.time()
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
-
+            logger.info(f"Processing: {func_name}")
             f = NativeFunction(
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
@@ -166,6 +164,8 @@ class Disassembler(ABC):
             elif not f.thunk:
                 logger.warn(
                     f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
+
+            logger.info(f"Analysis Pass 1 - {func_name}: {time.time()-start:.2f}s")
 
         # 2nd pass to do callee/callers
         for func_ctxt in self.get_func_iterator():
@@ -458,7 +458,7 @@ class Disassembler(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
+    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
         raise NotImplementedError
 

@@ -67,6 +67,7 @@ def parse(
                 s.commit()
 
         if interactive:
+            print("Binary stored in variable 'b'")
             IPython.embed()
 
 

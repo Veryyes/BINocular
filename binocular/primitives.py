@@ -163,7 +163,7 @@ class Reference(BaseModel):
         return hash((self.from_, self.to, self.type.value))
 
     def __repr__(self):
-        return f"{hex(self.from_)} -{self.type.name}-> {hex(self._to)}"
+        return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
 
     def orm(self):
         return ReferenceORM(
@@ -184,8 +184,6 @@ class Argument(BaseModel):
 
     var_args: bool = False
     '''True when the argument is Variadic (i.e. more than one argument, like printf)'''
-
-    is_func_ptr: bool = False
 
     # TODO pydantic alias fields
     # so we can represent args in multiple langs?
@@ -912,10 +910,10 @@ class Section(BaseModel):
     start: int
     offset: int
     size: int
-    entsize: int
-    link: int
-    info: int
-    align: int
+    entsize: int = 0
+    link: int = 0
+    info: int = 0
+    align: int = 0
 
     # flags
     write: bool = False
