@@ -75,13 +75,14 @@ class PipeRPC:
     RESFMT = "!BI"
     RESFMT_SIZE = struct.calcsize(RESFMT)
 
-    def __init__(self, gscript_ip:str="127.0.0.1", port:int=7331):
+    def __init__(self, gscript_ip:str="127.0.0.1", port:int=7331, timeout:int=30):
         self.gscript_ip = gscript_ip
         self.port = port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.is_connected = False
+        self.timeout = timeout
 
-    def connect(self, timeout:int=30):
+    def connect(self):
         logger.info(f"Attempting to Connect to: {self.gscript_ip}:{self.port}")
         waited = 0.0
         while not self.is_connected:
@@ -94,7 +95,7 @@ class PipeRPC:
                 time.sleep(.25)
                 waited += .25
 
-            if waited > timeout:
+            if waited > self.timeout:
                 raise ConnectionRefusedError("Unable to Connect to BINocular Ghidra Script")
 
         self.is_connected = False    
@@ -126,7 +127,7 @@ class PipeRPC:
             raise Exception(f"Recieved negative lengthed response")
 
         if size > 0:
-            return self._recv_bytes(self.sock, size, timeout=300)
+            return self._recv_bytes(self.sock, size, timeout=self.timeout)
 
         return b""
 
@@ -404,13 +405,21 @@ class Ghidra(Disassembler):
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: True on success, false otherwise
         '''
+        bin_size = 0
+        m = hashlib.md5()
+        with open(path, 'rb') as f:
+            chunk = f.read(4096)
+            while chunk:
+                m.update(chunk)
+                bin_size += len(chunk)
+                chunk = f.read(4096)
+            
+        md5hash = m.hexdigest()
+
         cmd = [self._analyze_headless_path()]
         if self.ghidra_url is not None:
             cmd.append(self.ghidra_url)
         else:
-            with open(path, 'rb') as f:
-                md5hash = hashlib.md5(f.read()).hexdigest()
-
             # Containing folder of the project is the same name of the project
             # A little cleaner to handle when you can just rm the <md5sum>/ to 
             # delete a whole project if need be
@@ -419,7 +428,8 @@ class Ghidra(Disassembler):
             os.makedirs(self.project_location, exist_ok=True)
             cmd += [self.project_location, self.project_name]
 
-        self.rpc_pipe = PipeRPC()
+        # 30s + 1 minutes per 500KB
+        self.rpc_pipe = PipeRPC(timeout = round(30 + 60 * (bin_size/(1024*500))))
 
         # Import a new File into Ghidra
         # if we already imported it, this will fail and nothing bad happens

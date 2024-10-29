@@ -2,3 +2,4 @@
 /binocular/data
 .vscode/
 dist/
+*.profile
