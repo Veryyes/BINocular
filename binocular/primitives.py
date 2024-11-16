@@ -1015,12 +1015,13 @@ class Binary(NativeCode):
         )
         b.set_path(orm.metainfo.path)
 
-        if b._functions is None:
-            b._functions = set()
+        if b.functions is None:
+            b.functions = set()
 
         for f in orm.functions:
             func = NativeFunction.from_orm(f)
-            b._functions.add(func)
+            b.functions.add(func)
+            b._function_lookup[f.address] = f
 
         return b
 
