@@ -3,12 +3,14 @@ from enum import Enum
 from pathlib import Path
 from typing_extensions import Annotated
 import string
+import logging
 
 import typer
 from sqlalchemy.orm import Session
 import IPython
 
 from binocular import Backend, Ghidra, Rizin
+from binocular import logger
 
 app = typer.Typer()
 
@@ -25,9 +27,11 @@ def parse(
     uri: Annotated[str, typer.Option(
         '-u', '--uri', help="SQL database URI")] = None,
     quiet: Annotated[bool, typer.Option(
-        '-q', '--quiet', help="Don't print anything")] = False,
+        '-q', '--quiet', help="Supress Analysis Output")] = False,
     interactive: Annotated[bool, typer.Option(
-        '-i', '--ipython', help="Launch an IPython shell after loading")] = False
+        '-i', '--ipython', help="Launch an IPython shell after loading")] = False,
+    json: Annotated[bool, typer.Option(
+        '-j', '--json', help="Output parsed binary as json data")] = False
 ):
     disasm_type = None
     if disassm == DisassemblerChoice.rizin:
@@ -46,10 +50,17 @@ def parse(
     if not disasm_type.is_installed():
         disasm_type.install()
 
-    with disasm_type() as disasm:
+    if quiet:
+        logging.disable(logging.INFO)
+        logging.disable(logging.WARN)
+
+    with disasm_type(verbose=not quiet) as disasm:
         disasm.load(path)
         b = disasm.binary
-        if not quiet:
+        if json:
+            import json
+            print(b.model_dump_json())
+        elif not quiet:
             print("Binary:")
             print(f"\tName: {b.names[0]}")
             print(f"\tArch: {b.architecture}")
@@ -61,8 +72,6 @@ def parse(
 
         if uri is not None:
             with Session(Backend.engine) as s:
-                if not quiet:
-                    print("Inserting to DB")
                 b.db_add(s)
                 s.commit()
 

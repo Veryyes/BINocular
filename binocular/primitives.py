@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union, Set, IO, Optional, Iterable, Any, Type
+from typing import Dict, List, Union, Set, IO, Optional, Any, Type
 from typing_extensions import Annotated
 from functools import cached_property
 from pathlib import Path
@@ -16,7 +16,7 @@ from pydantic.functional_validators import PlainValidator
 from pydantic.dataclasses import dataclass
 from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 from sqlalchemy.engine.base import Engine
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 import pyvex
 import lief
@@ -68,6 +68,8 @@ class Backend:
 class NoDBException(Exception):
     pass
 
+class NoContextException(Exception):
+    pass
 
 class Branch(BaseModel):
     '''
@@ -493,17 +495,14 @@ class BasicBlock(NativeCode):
             if instr.ir is not None:
                 [session.add(ir) for ir in instr.ir]
 
-
 class NativeFunction(NativeCode):
     '''
     Represents a natively compiled function
     '''
     _backend: Backend = Backend()
-    _context: Any = None
-    _block_cache: Dict[int, Optional[BasicBlock]] = dict()
+
+    _block_lookup: Dict[int, BasicBlock] = dict()
     _binary: Binary = None
-    _calls: Set[NativeFunction] = None
-    _callers: Set[NativeFunction] = None
 
     address: Optional[int] = None
     pie: Optional[PIEType] = None
@@ -516,9 +515,16 @@ class NativeFunction(NativeCode):
     sources: Set[SourceFunction] = set([])
     thunk: bool = False
 
+    calls_addrs: Set[int] = set([])
+    called_by: Set[int] = set([])
     basic_blocks: Set[BasicBlock] = set([])
-    start: Optional[BasicBlock] = None
-    end: Set[BasicBlock] = set([])
+    end_block_addrs: Set[int] = set([])
+
+    @model_validator(mode='after')
+    def _populate_cache(self):
+        for bb in self.basic_blocks:
+            self._block_lookup[bb.address] = bb
+        return self
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -580,67 +586,44 @@ class NativeFunction(NativeCode):
 
         return None
 
+    def start(self):
+        return self._block_lookup[self.address]
+
+    def end(self):
+        return [self._block_lookup[e] for e in self.end_block_addrs]
+
     @property
     def calls(self):
         '''Functions that this Function Calls'''
-        if self._calls is not None:
-            return self._calls
+        if not self._binary:
+            raise NoContextException("Function is not associated with Binary")
 
-        if self._backend.db is not None:
-            with Session(self._backend.db) as s:
-                self.sha256
-                stmt = select(NativeFunctionORM).where(
-                    NativeFunctionORM.sha256 == self.sha256)
-                f = s.execute(stmt).first()
-                if f.calls is not None:
-                    self._calls = set([NativeFunction.from_orm(callee)
-                                      for callee in f.calls])
-                    return self._calls
-
-        if self._backend.disassembler is not None:
-            self._calls = set(self._backend.disassembler.get_func_callees(
-                self.address, self._context))
-            return self._calls
-
-        return set()
+        for addr in self.calls_addrs:
+            f = self._binary._function_lookup.get(addr, None)
+            if f is not None:
+                yield f
 
     @property
     def callers(self):
         '''Functions that call this Function'''
-        if self._callers is not None:
-            return self._callers
+        if not self._binary:
+            raise NoContextException("Function is not associated with Binary")
 
-        if self._backend.db is not None:
-            with Session(self._backend.db) as s:
-                self.sha256
-                stmt = select(NativeFunctionORM).where(
-                    NativeFunctionORM.sha256 == self.sha256)
-                f = s.execute(stmt).first()
-                if f.callers is not None:
-                    self._callers = set(
-                        [NativeFunction.from_orm(caller) for caller in f.callers])
-                    return self._callers
-
-        if self._backend.disassembler is not None:
-            self._callers = set(self._backend.disassembler.get_func_callers(
-                self.address, self._context))
-            return self._callers
+        for addr in self.called_by:
+            f = self._binary._function_lookup.get(addr, None)
+            if f is not None:
+                yield f
 
     @cached_property
     def cfg(self) -> nx.MultiDiGraph:
         '''Control Flow Graph of the Function'''
 
-        # setup cache
-        blocks = dict()
-        for bb in self.basic_blocks:
-            blocks[bb.address] = bb
-
         cfg = nx.MultiDiGraph()
-        self._cfg(set(), blocks, cfg, self.start)
+        self._cfg(set(), cfg, self.start())
 
         return cfg
 
-    def _cfg(self, history, block_cache, g, bb):
+    def _cfg(self, history, g, bb:BasicBlock):
         if bb in history:
             return
 
@@ -648,11 +631,14 @@ class NativeFunction(NativeCode):
         g.add_node(bb)
 
         for btype, dest in bb:
+            if dest not in self._block_lookup:
+                continue
+
             g.add_node(dest)
             g.add_edge(bb, dest, branch=btype)
 
             if isinstance(dest, BasicBlock):
-                self._cfg(history, block_cache, g, dest)
+                self._cfg(history, g, dest)
 
     @cached_property
     def xrefs(self) -> Set[Reference]:
@@ -952,8 +938,9 @@ class Binary(NativeCode):
     # The file contents of the binary
     _bytes: bytes = None
     _size: int = None
+    _function_lookup: Dict[int, NativeFunction] = dict()
 
-    _functions: Set[NativeFunction] = None
+    functions: Set[NativeFunction] = set()
 
     filename: Optional[Union[str, List[str]]] = None
 
@@ -973,6 +960,13 @@ class Binary(NativeCode):
 
     # User defined tags
     tags: Set[str] = set([])
+
+    @model_validator(mode='after')
+    def _populate_cache(self):
+        for f in self.functions:
+            self._function_lookup[f.address] = f
+        return self
+
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -1021,12 +1015,13 @@ class Binary(NativeCode):
         )
         b.set_path(orm.metainfo.path)
 
-        if b._functions is None:
-            b._functions = set()
+        if b.functions is None:
+            b.functions = set()
 
         for f in orm.functions:
             func = NativeFunction.from_orm(f)
-            b._functions.add(func)
+            b.functions.add(func)
+            b._function_lookup[f.address] = f
 
         return b
 
@@ -1191,31 +1186,31 @@ class Binary(NativeCode):
     def fortify_score(self) -> int:
         return self._checksec.fortify_score
 
-    @computed_field(repr=True)
-    @property
-    def functions(self) -> Iterable[NativeFunction]:
-        if self._functions is not None:
-            return self._functions
+    # @computed_field(repr=True)
+    # @property
+    # def functions(self) -> Iterable[NativeFunction]:
+    #     if self._functions is not None:
+    #         return self._functions
 
-        if self._backend.disassembler is not None:
-            self._functions = self._backend.disassembler.functions
-            return self._functions
+    #     if self._backend.disassembler is not None:
+    #         self._functions = self._backend.disassembler.functions
+    #         return self._functions
 
-        if self._backend.db is not None:
-            with Session(self._backend.db) as s:
-                # Weirdness w/ query building & cached property
-                # warm cache up before building query or else it breaks
-                self.sha256
+    #     if self._backend.db is not None:
+    #         with Session(self._backend.db) as s:
+    #             # Weirdness w/ query building & cached property
+    #             # warm cache up before building query or else it breaks
+    #             self.sha256
 
-                stmt = select(BinaryORM).where(BinaryORM.sha256 == self.sha256)
-                bin_orm = s.execute(stmt).first()
-                if bin_orm is not None:
-                    self._functions = [NativeFunction.from_orm(
-                        f) for f in bin_orm[0].functions]
-                    return self._functions
+    #             stmt = select(BinaryORM).where(BinaryORM.sha256 == self.sha256)
+    #             bin_orm = s.execute(stmt).first()
+    #             if bin_orm is not None:
+    #                 self._functions = [NativeFunction.from_orm(
+    #                     f) for f in bin_orm[0].functions]
+    #                 return self._functions
 
-        # Unable to recover or retrieve functions
-        return set()
+    #     # Unable to recover or retrieve functions
+    #     return set()
 
     def io(self) -> IO:
         '''returns a stream/IO handle to the bytes of the binary. This function does not self close the stream'''

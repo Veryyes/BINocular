@@ -2,6 +2,7 @@ import os
 import itertools
 import tempfile
 from urllib.request import urlopen
+import json 
 
 from binocular import Ghidra, Binary
 
@@ -146,4 +147,3 @@ def test_function(make):
         assert f in f.callers
         assert f in f.calls
 
-        
