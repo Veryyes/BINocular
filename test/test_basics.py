@@ -1,4 +1,5 @@
-from binocular import Rizin, Binary
+from binocular import Rizin, Ghidra, Binary
+import json
 
 def test_instr_serial():
     with Rizin() as g:
@@ -34,3 +35,16 @@ def test_bin_serial():
         b.model_dump_json()
 
     assert True
+
+def test_serial_and_back(make):
+    assert Ghidra.is_installed()
+    
+    serialized = None
+    with Ghidra() as g:       
+        g.load("example")
+        b = g.binary
+        serialized = json.loads(b.model_dump_json())
+        b_prime = Binary.model_validate(serialized)
+
+        assert b.names[0] == b_prime.names[0]
+        assert len(b.functions) == len(b_prime.functions)

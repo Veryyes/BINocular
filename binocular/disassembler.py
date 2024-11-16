@@ -68,6 +68,7 @@ class Disassembler(ABC):
         self._pre_normalize(path)
         self._create_binary()
         self._create_functions()
+        self.binary.functions = self.functions
         self._post_normalize()
         logger.info(
             f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
@@ -159,8 +160,9 @@ class Disassembler(ABC):
             self._func_names[func_name] = f
 
             if len(f.basic_blocks) > 0:
-                f.end = set(
-                    (bb for bb, out_degree in f.cfg.out_degree() if out_degree == 0))
+                f.end_block_addrs = set(
+                    (bb.address for bb, out_degree in f.cfg.out_degree() if out_degree == 0))
+                    
             elif not f.thunk:
                 logger.warn(
                     f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
@@ -173,17 +175,13 @@ class Disassembler(ABC):
             func_name = self.get_func_name(addr, func_ctxt)
             f = self._func_addrs[addr]
 
-            f._callers = set()
+            f.called_by = set()
             for caller_addr in self.get_func_callers(addr, func_ctxt):
-                caller = self._func_addrs.get(caller_addr, None)
-                if caller is not None:
-                    f._callers.add(caller)
+                f.called_by.add(caller_addr)
 
-            f._calls = set()
+            f.calls_addrs = set()
             for callee_addr in self.get_func_callees(addr, func_ctxt):
-                callee = self._func_addrs.get(callee_addr, None)
-                if callee is not None:
-                    f.calls.add(callee)
+                f.calls_addrs.add(callee_addr)
 
         run_time = time.time() - start
         logger.info(f"[{self.name()}] {self._bb_count} Basic Blocks Loaded")
@@ -206,9 +204,6 @@ class Disassembler(ABC):
                 address=bb_addr
             )
 
-            if bb_addr == f.address:
-                f.start = bb
-
             for branch_data in self.get_next_bbs(bb_addr, bb_ctxt, addr, func_ctxt):
                 bb.branches.add(branch_data)
 
@@ -220,6 +215,7 @@ class Disassembler(ABC):
             xrefs -= bb.xrefs
 
             f.basic_blocks.add(bb)
+            f._block_lookup[bb.address] = bb
             bb.set_function(f)
 
             self._bbs[bb_addr] = bb
