@@ -1186,32 +1186,6 @@ class Binary(NativeCode):
     def fortify_score(self) -> int:
         return self._checksec.fortify_score
 
-    # @computed_field(repr=True)
-    # @property
-    # def functions(self) -> Iterable[NativeFunction]:
-    #     if self._functions is not None:
-    #         return self._functions
-
-    #     if self._backend.disassembler is not None:
-    #         self._functions = self._backend.disassembler.functions
-    #         return self._functions
-
-    #     if self._backend.db is not None:
-    #         with Session(self._backend.db) as s:
-    #             # Weirdness w/ query building & cached property
-    #             # warm cache up before building query or else it breaks
-    #             self.sha256
-
-    #             stmt = select(BinaryORM).where(BinaryORM.sha256 == self.sha256)
-    #             bin_orm = s.execute(stmt).first()
-    #             if bin_orm is not None:
-    #                 self._functions = [NativeFunction.from_orm(
-    #                     f) for f in bin_orm[0].functions]
-    #                 return self._functions
-
-    #     # Unable to recover or retrieve functions
-    #     return set()
-
     def io(self) -> IO:
         '''returns a stream/IO handle to the bytes of the binary. This function does not self close the stream'''
         if self._path is not None:
