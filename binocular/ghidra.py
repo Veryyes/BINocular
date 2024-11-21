@@ -65,6 +65,7 @@ class PipeRPC:
         INSTR_COMMENT = 52
         STRINGS = 54
         FUNC_IS_THUNK = 56
+        FUNC_BATCH = 58
         
 
     # Requests will have no length. Size is known
@@ -117,7 +118,7 @@ class PipeRPC:
         self.sock.sendall(msg)
 
         header = b""
-        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE)
+        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
         
         if res_id != id + 1:
@@ -131,7 +132,7 @@ class PipeRPC:
 
         return b""
 
-    def _recv_bytes(self, sock:socket.socket, size:int, timeout:int=60):
+    def _recv_bytes(self, sock:socket.socket, size:int, timeout:int):
         data = b""
         start = time.time()
         while len(data) < size:
@@ -363,7 +364,6 @@ class Ghidra(Disassembler):
         self.rpc_pipe = None
 
         self.save_on_close = save_on_close
-        self.decomp_timeout = 60
 
     def _analyze_headless_path(self):
         return os.path.join(
@@ -399,6 +399,11 @@ class Ghidra(Disassembler):
         # if self.stdout_reader.is_alive:
         #     self.stdout_reader.join()
 
+    def analysis_timeout(self, bin_size) -> int:
+        # 30s + 
+        # 1 minutes per 500KB
+        return round(30 + 60 * (bin_size/(1024*500)))
+
     def analyze(self, path) -> bool:
         '''
         Loads the binary specified by `path` into the disassembler.
@@ -428,8 +433,7 @@ class Ghidra(Disassembler):
             os.makedirs(self.project_location, exist_ok=True)
             cmd += [self.project_location, self.project_name]
 
-        # 30s + 1 minutes per 500KB
-        self.rpc_pipe = PipeRPC(timeout = round(30 + 60 * (bin_size/(1024*500))))
+        self.rpc_pipe = PipeRPC(timeout = self.analysis_timeout(bin_size))
 
         # Import a new File into Ghidra
         # if we already imported it, this will fail and nothing bad happens
@@ -449,7 +453,10 @@ class Ghidra(Disassembler):
             "-scriptPath", Ghidra.SCRIPT_PATH(),
             "-postScript", "BinocularPipe.java", self.rpc_pipe.gscript_ip, str(self.rpc_pipe.port)
         ]
-        # print(" ".join(cmd))
+        
+        if self.verbose:
+            logger.info("$ " + " ".join(cmd))
+
         self.ghidra_proc = subprocess.Popen(
             cmd,
             stdout = subprocess.PIPE,
@@ -457,14 +464,14 @@ class Ghidra(Disassembler):
         )
 
         # If you wanna see java's stdout
-        # def getoutput(proc):
-        #     for line in iter(proc.stdout.readline, b""):
-        #         logger.info(str(line, 'utf8').strip())
-        #     logger.info("GHIDRA DONE")
+        def getoutput(proc):
+            for line in iter(proc.stdout.readline, b""):
+                logger.info(str(line, 'utf8').strip())
+            logger.info("GHIDRA DONE")
 
-        # self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        # if self.verbose:
-        #     self.stdout_reader.start()
+        self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
+        if self.verbose:
+            self.stdout_reader.start()
         
         return True, None
 
@@ -483,7 +490,6 @@ class Ghidra(Disassembler):
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''
         return str(self.rpc_pipe.request(PipeRPC.Command.BINARY_NAME), 'utf8')
-
 
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
@@ -577,7 +583,13 @@ class Ghidra(Disassembler):
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
-        return str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
+        name =  str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
+        # fbatch = self.rpc_pipe.request(PipeRPC.Command.FUNC_BATCH, f_addr=addr)
+        
+        # import IPython
+        # IPython.embed()
+        # exit(1)
+        return name
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''

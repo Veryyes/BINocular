@@ -1,11 +1,3 @@
-/*
- Initialize all resources needed
- Open up a named pipe specified by the parameters it gets called with
- Wait for input and handle it
-    essentially an rpc implementation of disassembler.py
- */
-
-//Makes functions out of a run of selected ARM or Thumb function pointers 
 //@category BINocular
 
 import java.net.ServerSocket;
@@ -66,37 +58,6 @@ import ghidra.util.exception.CancelledException;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
 
-class BINVariable{
-    public String type;
-    public String name;
-    public boolean isRegister;
-    public boolean isStack;
-    public int stackOffset;
-
-    public BINVariable(String type, String name, boolean isRegister, boolean isStack){
-        this.type = type;
-        this.name = name;
-        this.isRegister = isRegister;
-        this.isStack = isStack;
-        this.stackOffset = 0;
-    }
-
-    public byte[] getBytes(){
-        int lengths = this.type.length() + this.name.length() + 2;
-
-        ByteBuffer buf = ByteBuffer.allocate(lengths + 6);
-        buf.order(ByteOrder.BIG_ENDIAN);
-        buf.put(this.type.getBytes());
-        buf.put((byte)0);
-        buf.put(this.name.getBytes());
-        buf.put((byte)0);
-        buf.put(this.isRegister ? (byte)1 : (byte)0);
-        buf.put(this.isStack ? (byte)1 : (byte)0);
-        buf.putInt(this.stackOffset);
-
-        return buf.array();
-    }
-}
 
 public class BinocularPipe extends GhidraScript{
     // Fuck enums
@@ -131,6 +92,7 @@ public class BinocularPipe extends GhidraScript{
     final byte INSTR_COMMENT = 52;
     final byte STRINGS = 54;
     final byte FUNC_IS_THUNK = 56;
+    final byte FUNC_BATCH = 58;
 
     // XRef Types
     final byte UNKNOWN = 0;
@@ -157,6 +119,38 @@ public class BinocularPipe extends GhidraScript{
     HashMap<Long, CodeBlock> basicBlockMap = new HashMap<>();
     HashMap<Function, DecompileResults> decompCache = new HashMap<>();
     int timeout;
+
+    private class BINVariable{
+        public String type;
+        public String name;
+        public boolean isRegister;
+        public boolean isStack;
+        public int stackOffset;
+
+        public BINVariable(String type, String name, boolean isRegister, boolean isStack){
+            this.type = type;
+            this.name = name;
+            this.isRegister = isRegister;
+            this.isStack = isStack;
+            this.stackOffset = 0;
+        }
+
+        public byte[] getBytes(){
+            int lengths = this.type.length() + this.name.length() + 2;
+
+            ByteBuffer buf = ByteBuffer.allocate(lengths + 6);
+            buf.order(ByteOrder.BIG_ENDIAN);
+            buf.put(this.type.getBytes());
+            buf.put((byte)0);
+            buf.put(this.name.getBytes());
+            buf.put((byte)0);
+            buf.put(this.isRegister ? (byte)1 : (byte)0);
+            buf.put(this.isStack ? (byte)1 : (byte)0);
+            buf.putInt(this.stackOffset);
+
+            return buf.array();
+        }
+    }
 
     @Override
     public void run() throws Exception{
@@ -193,7 +187,6 @@ public class BinocularPipe extends GhidraScript{
             }
             
         }
-
     }
 
     private boolean handleClient(BufferedInputStream in, BufferedOutputStream out) throws IOException{
@@ -229,31 +222,34 @@ public class BinocularPipe extends GhidraScript{
             error = true;
             response = e.toString().getBytes();
         }
-        
-        if (response == null){
-            res_size = 0;
-        }else{
-            res_size = response.length;
+
+        byte resType = ERROR;
+        if (!error){
+            resType = (byte)(id + 1);
         }
 
+        byte[] raw = this.basicPack(resType, response);
 
-        ByteBuffer out_buff = ByteBuffer.allocate(res_size + 5);
-        out_buff.order(ByteOrder.BIG_ENDIAN);
-        if (error){
-            out_buff.put(ERROR);    
-        }else{
-            out_buff.put((byte)(id+1));
-        }
-        out_buff.putInt(res_size);
-        if (res_size > 0)
-            out_buff.put(response);
-
-        byte[] raw = out_buff.array();
         out.write(raw, 0, raw.length);
         out.flush();
         
-
         return running;
+    }
+
+    private byte[] basicPack(byte type, byte[] data){
+        int size = 0;
+        if (data != null)
+            size = data.length;
+
+        ByteBuffer out = ByteBuffer.allocate(size + 5);
+        out.order(ByteOrder.BIG_ENDIAN);
+
+        out.put(type);
+        out.putInt(size);
+        if (size > 0)
+            out.put(data);
+
+        return out.array();
     }
 
     private byte[] handleCommand(int id, long bbAddr, long funcAddr, long instrAddr) throws CancelledException{
@@ -337,6 +333,8 @@ public class BinocularPipe extends GhidraScript{
                 return f.isThunk() ? new byte[]{1} : new byte[]{0};
             case SECTIONS:
                 return this.packSection(this.getSections());
+            case FUNC_BATCH:
+                return this.entireFunction(f);
             default:
                 return null;
         }
@@ -798,6 +796,79 @@ public class BinocularPipe extends GhidraScript{
         comments.removeIf(item -> item == null);
 
         return String.join("\n", comments);
+    }
+
+    public byte[] entireFunction(Function f) throws CancelledException {
+        int total_size = 5;
+        byte[][] functionData = {
+            this.getFunctionName(f).getBytes(),
+            this.packStringList(this.getFunctionArgs(f)),
+            this.getFunctionReturnType(f).getBytes(),
+            this.packInt(this.getFunctionStackFrameSize(f)),
+            this.packFunctionList(this.getFunctionCallers(f)),
+            this.packFunctionList(this.getFunctionCallees(f)),
+            this.packReferenceList(this.getFunctionXRefs(f)),
+            this.getFunctionDecompilation(f).getBytes(),
+            this.packVariableList(this.getFunctionVars(f)),
+            f.isThunk() ? new byte[]{1} : new byte[]{0}
+        };
+        
+        for(byte[] data: functionData){
+            total_size += data.length;
+        }
+
+        LinkedList<byte[]> data = new LinkedList<>();
+
+        for (CodeBlock blk: this.getFunctionBasicBlocks(f)){
+            long bbAddr = blk.getFirstStartAddress().getOffset();
+            byte[] branches = this.packCodeBlockRef(this.getBasicBlockBranches(blk));
+
+            data.add(this.basicPack(FUNC_BB, this.packLong(bbAddr)));
+            data.add(this.basicPack(BB_BRANCHES, branches));
+            
+            for (Instruction instr: this.getBasicBlockInstructions(blk)){
+                long instrAddr = instr.getAddress().getOffset();
+                byte[] instrBytes;
+                try{
+                    instrBytes = instr.getBytes();
+                }catch (MemoryAccessException e){
+                    instrBytes = new byte[]{0};
+                }
+
+                ByteBuffer buff = ByteBuffer.allocate(2 + instrBytes.length + instr.getMnemonicString().getBytes().length);
+                buff.put((byte)instrBytes.length);
+                buff.put(instrBytes);
+                buff.put((byte)instr.getMnemonicString().getBytes().length);
+                buff.put(instr.getMnemonicString().getBytes());
+                
+                data.add(buff.array());
+
+                data.add(this.basicPack(INSTR_PCODE, this.getIR(instr.getAddress()).getBytes()));
+                data.add(this.basicPack(INSTR_COMMENT, this.getComments(instr.getAddress()).getBytes()));
+            }
+        }
+
+        for (byte[] d: data){
+            total_size += d.length;
+        }
+
+        int curr = 1;
+        byte[] out = new byte[total_size];
+        out[0] = FUNC_BATCH;
+        System.arraycopy(this.packInt(total_size), 0, out, curr, 4);
+        curr = 5;
+
+        for(byte[] fData: functionData){
+            System.arraycopy(fData, 0, out, curr, fData.length);
+            curr += fData.length;
+        }
+
+        for(byte[] d: data){
+            System.arraycopy(d, 0, out, curr, d.length);
+            curr += d.length;
+        }
+
+        return out;
     }
 
 }
