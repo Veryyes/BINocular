@@ -524,6 +524,7 @@ class NativeFunction(NativeCode):
     def _populate_cache(self):
         for bb in self.basic_blocks:
             self._block_lookup[bb.address] = bb
+            bb._function = self
         return self
 
     @classmethod
@@ -595,7 +596,7 @@ class NativeFunction(NativeCode):
     @property
     def calls(self):
         '''Functions that this Function Calls'''
-        if not self._binary:
+        if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
 
         for addr in self.calls_addrs:
@@ -606,7 +607,7 @@ class NativeFunction(NativeCode):
     @property
     def callers(self):
         '''Functions that call this Function'''
-        if not self._binary:
+        if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
 
         for addr in self.called_by:
@@ -965,6 +966,7 @@ class Binary(NativeCode):
     def _populate_cache(self):
         for f in self.functions:
             self._function_lookup[f.address] = f
+            f._binary = self
         return self
 
 
