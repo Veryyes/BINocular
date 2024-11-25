@@ -392,7 +392,7 @@ class Ghidra(Disassembler):
                     if len(err) > 0:
                         logger.warning(str(err, 'utf8'))
                 
-            except TimeoutError:
+            except subprocess.TimeoutExpired:
                 self.ghidra_proc.kill()
                 logger.warning("Killed Ghidra Process. Took Too long")
 
@@ -402,7 +402,7 @@ class Ghidra(Disassembler):
     def analysis_timeout(self, bin_size) -> int:
         # 30s + 
         # 1 minutes per 500KB
-        return round(30 + 60 * (bin_size/(1024*500)))
+        return round(30 + 60 * (bin_size/(1024))**2)
 
     def analyze(self, path) -> bool:
         '''
@@ -468,6 +468,9 @@ class Ghidra(Disassembler):
             for line in iter(proc.stdout.readline, b""):
                 logger.info(str(line, 'utf8').strip())
             logger.info("GHIDRA DONE")
+
+        # TODO can we wait for auto analysis to finish?
+        # parse stdout until we see a specific string or proc dies
 
         self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
         if self.verbose:
