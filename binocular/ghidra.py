@@ -14,6 +14,7 @@ import re
 import subprocess
 import struct
 import threading
+import queue
 import time
 from enum import Enum
 import socket
@@ -141,6 +142,40 @@ class PipeRPC:
                 raise TimeoutError
 
         return data
+
+class StdoutMonitor(threading.Thread):
+    def __init__(self, verbose:bool=False):
+        super().__init__()
+        self.proc:subprocess.Popen = None
+        self.verbose = verbose
+        self.output = queue.Queue()
+    
+
+    def run(self):
+        if self.proc is None:
+            return
+
+        lines = iter(self.proc.stdout.readline, b"")
+
+        while self.proc.poll() is None:
+            try:
+                line = str(next(lines), 'utf8').strip()
+
+                if self.verbose:
+                    logger.info(line)
+
+                self.output.put(line)
+            except StopIteration:
+                time.sleep(.10)
+
+        if self.verbose:
+            logger.info("GHIDRA DONE")
+
+    def readline(self):
+        return self.output.get()
+
+    def lines_left(self):
+        return self.output.qsize()
 
 class Ghidra(Disassembler):
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
@@ -330,9 +365,9 @@ class Ghidra(Disassembler):
         return os.path.exists(release_install) or os.path.exists(build_install)
 
     
-    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
+    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home:str=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
-
+        # TODO they arent used
         self.jvm_args = jvm_args
         if self.jvm_args is None:
             self.jvm_args = list()
@@ -362,6 +397,7 @@ class Ghidra(Disassembler):
 
         self.ghidra_proc = None
         self.rpc_pipe = None
+        self.stdout_monitor = StdoutMonitor(self.verbose)
 
         self.save_on_close = save_on_close
 
@@ -383,9 +419,18 @@ class Ghidra(Disassembler):
 
         if self.ghidra_proc is not None:
             try:
-                self.rpc_pipe.request(PipeRPC.Command.QUIT)
-                self.rpc_pipe.close()
-                out, err = self.ghidra_proc.communicate(timeout=5)
+                pipe_dead = False
+                while self.stdout_monitor.lines_left() > 0:
+                    pipe_dead = "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor.readline()
+                    break
+                
+                if not pipe_dead:
+                    logger.info("Closing RPC Pipe...")
+                    self.rpc_pipe.request(PipeRPC.Command.QUIT)
+                    self.rpc_pipe.close()
+
+                logger.info("Waiting on Ghidra to exit...")
+                out, err = self.ghidra_proc.communicate(timeout=1)
                 if self.verbose:
                     if len(out) > 0:
                         logger.info(str(out, 'utf8'))
@@ -396,15 +441,16 @@ class Ghidra(Disassembler):
                 self.ghidra_proc.kill()
                 logger.warning("Killed Ghidra Process. Took Too long")
 
-        # if self.stdout_reader.is_alive:
-        #     self.stdout_reader.join()
+        exit_code = self.ghidra_proc.poll()
+        assert exit_code is not None
+        logger.info(f"Ghidra Process has exited: {exit_code}")
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s + 
         # 1 minutes per 500KB
         return round(30 + 60 * (bin_size/(1024))**2)
 
-    def analyze(self, path) -> bool:
+    def analyze(self, path) -> Tuple[bool, Optional[str]]:
         '''
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
@@ -462,21 +508,28 @@ class Ghidra(Disassembler):
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE
         )
-
-        # If you wanna see java's stdout
-        def getoutput(proc):
-            for line in iter(proc.stdout.readline, b""):
-                logger.info(str(line, 'utf8').strip())
-            logger.info("GHIDRA DONE")
-
-        # TODO can we wait for auto analysis to finish?
-        # parse stdout until we see a specific string or proc dies
-
-        self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        if self.verbose:
-            self.stdout_reader.start()
+        self.stdout_monitor.proc = self.ghidra_proc
+        self.stdout_monitor.start()
         
-        return True, None
+        start = time.time()
+        timedout = False
+        while (timedout := (time.time() - start < self.analysis_timeout(bin_size)) and self.ghidra_proc.poll() is None):
+            if self.stdout_monitor.lines_left() > 0:
+                line = self.stdout_monitor.readline()
+                if "Analysis succeeded for file" in line:
+                    return True, None
+
+            time.sleep(.01)
+
+        if timedout:
+            return False, "Analyze Headless Timedout"
+
+        # if process is exited
+        exit_code = self.ghidra_proc.poll()
+        if exit_code is not None:
+            return False, f"Analyze Headless exited with code: {exit_code}"
+
+        return False, "Analyze Headless in Weird State"
 
     @staticmethod
     def _unpack_str_list(raw:bytes) -> List[str]:
@@ -508,7 +561,7 @@ class Ghidra(Disassembler):
 
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
-        endian = str(self.rpc_pipe.request(PipeRPC.Command.ARCHITECTURE), 'utf8').lower()
+        endian = str(self.rpc_pipe.request(PipeRPC.Command.ENDIANNESS), 'utf8').lower()
         if endian == 'little':
             return Endian.LITTLE
         elif endian == 'big':
@@ -576,13 +629,17 @@ class Ghidra(Disassembler):
 
         for i in range(n_funcs):
             f = struct.unpack("!Q", raw[i*8:(i+1)*8])[0]
+
+            if self.batch_loading:
+                self._function_cache[f] = self.get_function_data(f)
+
             yield f
 
 
     def get_func_addr(self, func_ctxt: int) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
         # Here, func_ctxt is the address
-        return func_ctxt
+        return func_ctxt   
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
