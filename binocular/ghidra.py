@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections.abc import Iterable
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import Any, Optional, Tuple, List, IO
 import pkgutil
 import os
@@ -14,9 +14,11 @@ import re
 import subprocess
 import struct
 import threading
+import queue
 import time
 from enum import Enum
 import socket
+import io
 
 import requests
 from git import Repo
@@ -141,6 +143,40 @@ class PipeRPC:
                 raise TimeoutError
 
         return data
+
+class StdoutMonitor(threading.Thread):
+    def __init__(self, verbose:bool=False):
+        super().__init__()
+        self.proc:subprocess.Popen = None
+        self.verbose = verbose
+        self.output = queue.Queue()
+    
+
+    def run(self):
+        if self.proc is None:
+            return
+
+        lines = iter(self.proc.stdout.readline, b"")
+
+        while self.proc.poll() is None:
+            try:
+                line = str(next(lines), 'utf8').strip()
+
+                if self.verbose:
+                    logger.info(line)
+
+                self.output.put(line)
+            except StopIteration:
+                time.sleep(.10)
+
+        if self.verbose:
+            logger.info("GHIDRA DONE")
+
+    def readline(self):
+        return self.output.get()
+
+    def lines_left(self):
+        return self.output.qsize()
 
 class Ghidra(Disassembler):
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
@@ -330,9 +366,13 @@ class Ghidra(Disassembler):
         return os.path.exists(release_install) or os.path.exists(build_install)
 
     
-    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
+    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home:str=None, save_on_close=False, batch_loading:bool=True, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
+        self._function_cache = defaultdict(lambda: dict())
+        self._instruction_cache = dict()
+        self.batch_loading = batch_loading
 
+        # TODO they arent used
         self.jvm_args = jvm_args
         if self.jvm_args is None:
             self.jvm_args = list()
@@ -362,8 +402,28 @@ class Ghidra(Disassembler):
 
         self.ghidra_proc = None
         self.rpc_pipe = None
+        self.stdout_monitor = StdoutMonitor(self.verbose)
 
         self.save_on_close = save_on_close
+
+    def batch_cache(self, cmd:PipeRPC.Command, func_addr:int=None, bb_addr:int=None, instr_addr:int=None):
+        func_data = self._function_cache.get(func_addr, None)
+
+        if func_data is None:
+            return None
+        
+        if bb_addr is None:
+            return func_data[cmd]
+
+        bb_data = func_data.get(bb_addr, None) 
+        if bb_data is None:
+            return None
+
+        if cmd in [PipeRPC.Command.BB_BRANCHES, PipeRPC.Command.BB_INSTR]:
+            return bb_data[cmd]
+
+        return 
+        # return [data[cmd] for data in bb_data['instructions']]
 
     def _analyze_headless_path(self):
         return os.path.join(
@@ -383,9 +443,18 @@ class Ghidra(Disassembler):
 
         if self.ghidra_proc is not None:
             try:
-                self.rpc_pipe.request(PipeRPC.Command.QUIT)
-                self.rpc_pipe.close()
-                out, err = self.ghidra_proc.communicate(timeout=5)
+                pipe_dead = False
+                while self.stdout_monitor.lines_left() > 0:
+                    pipe_dead = "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor.readline()
+                    break
+                
+                if not pipe_dead:
+                    logger.info("Closing RPC Pipe...")
+                    self.rpc_pipe.request(PipeRPC.Command.QUIT)
+                    self.rpc_pipe.close()
+
+                logger.info("Waiting on Ghidra to exit...")
+                out, err = self.ghidra_proc.communicate(timeout=1)
                 if self.verbose:
                     if len(out) > 0:
                         logger.info(str(out, 'utf8'))
@@ -396,15 +465,16 @@ class Ghidra(Disassembler):
                 self.ghidra_proc.kill()
                 logger.warning("Killed Ghidra Process. Took Too long")
 
-        # if self.stdout_reader.is_alive:
-        #     self.stdout_reader.join()
+        exit_code = self.ghidra_proc.poll()
+        assert exit_code is not None
+        logger.info(f"Ghidra Process has exited: {exit_code}")
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s + 
         # 1 minutes per 500KB
         return round(30 + 60 * (bin_size/(1024))**2)
 
-    def analyze(self, path) -> bool:
+    def analyze(self, path) -> Tuple[bool, Optional[str]]:
         '''
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
@@ -462,21 +532,28 @@ class Ghidra(Disassembler):
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE
         )
-
-        # If you wanna see java's stdout
-        def getoutput(proc):
-            for line in iter(proc.stdout.readline, b""):
-                logger.info(str(line, 'utf8').strip())
-            logger.info("GHIDRA DONE")
-
-        # TODO can we wait for auto analysis to finish?
-        # parse stdout until we see a specific string or proc dies
-
-        self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        if self.verbose:
-            self.stdout_reader.start()
+        self.stdout_monitor.proc = self.ghidra_proc
+        self.stdout_monitor.start()
         
-        return True, None
+        start = time.time()
+        timedout = False
+        while (timedout := (time.time() - start < self.analysis_timeout(bin_size)) and self.ghidra_proc.poll() is None):
+            if self.stdout_monitor.lines_left() > 0:
+                line = self.stdout_monitor.readline()
+                if "Analysis succeeded for file" in line:
+                    return True, None
+
+            time.sleep(.01)
+
+        if timedout:
+            return False, "Analyze Headless Timedout"
+
+        # if process is exited
+        exit_code = self.ghidra_proc.poll()
+        if exit_code is not None:
+            return False, f"Analyze Headless exited with code: {exit_code}"
+
+        return False, "Analyze Headless in Weird State"
 
     @staticmethod
     def _unpack_str_list(raw:bytes) -> List[str]:
@@ -508,7 +585,7 @@ class Ghidra(Disassembler):
 
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
-        endian = str(self.rpc_pipe.request(PipeRPC.Command.ARCHITECTURE), 'utf8').lower()
+        endian = str(self.rpc_pipe.request(PipeRPC.Command.ENDIANNESS), 'utf8').lower()
         if endian == 'little':
             return Endian.LITTLE
         elif endian == 'big':
@@ -576,39 +653,63 @@ class Ghidra(Disassembler):
 
         for i in range(n_funcs):
             f = struct.unpack("!Q", raw[i*8:(i+1)*8])[0]
+
+            if self.batch_loading:
+                self._function_cache[f] = self.get_function_data(f)
+
             yield f
 
 
     def get_func_addr(self, func_ctxt: int) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
         # Here, func_ctxt is the address
-        return func_ctxt
+        return func_ctxt   
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
-        name =  str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
-        # fbatch = self.rpc_pipe.request(PipeRPC.Command.FUNC_BATCH, f_addr=addr)
-        
-        # import IPython
-        # IPython.embed()
-        # exit(1)
-        return name
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_NAME, addr)
+            if res is not None:
+                return res
+
+        return str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_ARGS, addr)
+            if res is not None:
+                return res
+        
         args_str = self._unpack_str_list(self.rpc_pipe.request(PipeRPC.Command.FUNC_ARGS, f_addr=addr))
         return [Argument.from_literal(s) for s in args_str]
 
     def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_RETURN, addr)
+            if res is not None:
+                return res
+
         return str(self.rpc_pipe.request(PipeRPC.Command.FUNC_RETURN, f_addr=addr), 'utf8')
 
     def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_STACK_FRAME, addr)
+            if res is not None:
+                return res
+        
         return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.Command.FUNC_STACK_FRAME, f_addr=addr))[0]
 
     def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_VARS, addr)
+            if res is not None:
+                return res
+
+
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_VARS, f_addr=addr)
         curr = 0
         while(curr < len(raw)):
@@ -630,13 +731,28 @@ class Ghidra(Disassembler):
 
     def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
         '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_IS_THUNK, addr)
+            if res is not None:
+                return res
+        
         return bool(self.rpc_pipe.request(PipeRPC.Command.FUNC_IS_THUNK, f_addr=addr)[0])
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.DECOMP, addr)
+            if res is not None:
+                return res
+
         return str(self.rpc_pipe.request(PipeRPC.Command.DECOMP, f_addr=addr), 'utf8')
 
     def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_CALLERS, addr)
+            if res is not None:
+                return res
+
         raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_CALLERS, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
@@ -644,12 +760,23 @@ class Ghidra(Disassembler):
 
 
     def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_CALLEES, addr)
+            if res is not None:
+                return res
+
+
         raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_CALLEES, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
     def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_XREFS, addr)
+            if res is not None:
+                return res
+
         raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_XREFS, f_addr=addr)
         struct_size = 17
         num_refs = len(raw) // struct_size
@@ -668,6 +795,11 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         '''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.FUNC_BB, addr)
+            if res is not None:
+                return res
+
         raw  = self.rpc_pipe.request(PipeRPC.Command.FUNC_BB, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
@@ -683,6 +815,11 @@ class Ghidra(Disassembler):
         '''
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.BB_BRANCHES, func_addr, bb_addr)
+            if res is not None:
+                return res
+        
         raw  = self.rpc_pipe.request(PipeRPC.Command.BB_BRANCHES, bb_addr=bb_addr)
         struct_size = 9
         n = len(raw) // struct_size
@@ -697,6 +834,12 @@ class Ghidra(Disassembler):
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''
+        if self.batch_loading:
+            res = self.batch_cache(PipeRPC.Command.BB_INSTR, func_ctxt, bb_addr)
+            if res is not None:
+                return res
+
+
         raw  = self.rpc_pipe.request(PipeRPC.Command.BB_INSTR, bb_addr=bb_addr)
         
         i = 0
@@ -722,9 +865,155 @@ class Ghidra(Disassembler):
         '''
         Returns the Intermediate Representation data based on the instruction given
         '''
+        if self.batch_loading:
+            instr_data = self._instruction_cache.get(instr_addr, None)
+            if instr_data is not None:
+                return instr_data[PipeRPC.Command.INSTR_PCODE]
+
         pcode = str(self.rpc_pipe.request(PipeRPC.Command.INSTR_PCODE, instr_addr=instr_addr), "utf8")
         return IR(lang_name=IL.PCODE, data=pcode)
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
+        if self.batch_loading:
+            instr_data = self._instruction_cache.get(instr_addr, None)
+            if instr_data is not None:
+                return instr_data[PipeRPC.Command.INSTR_COMMENT]
+
         return str(self.rpc_pipe.request(PipeRPC.Command.INSTR_COMMENT, instr_addr=instr_addr), "utf8")
+
+
+    def get_function_data(self, func_addr: int):
+        fbatch = self.rpc_pipe.request(PipeRPC.Command.FUNC_BATCH, f_addr=func_addr)
+        
+        fdata = defaultdict(lambda: dict())
+        wrap_fmt = "!BI"
+        data = io.BytesIO(fbatch)
+
+        cmd, _ = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_BATCH.value + 1
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_NAME.value + 1
+        fdata[PipeRPC.Command.FUNC_NAME] = str(data.read(size), 'utf8')
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_ARGS.value + 1
+        fdata[PipeRPC.Command.FUNC_ARGS] = [Argument.from_literal(s) for s in self._unpack_str_list(data.read(size))]
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_RETURN.value + 1
+        fdata[PipeRPC.Command.FUNC_RETURN] = str(data.read(size), 'utf8')
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_STACK_FRAME.value + 1
+        fdata[PipeRPC.Command.FUNC_STACK_FRAME] = struct.unpack("!I", data.read(size))[0]
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_CALLERS.value + 1
+        raw = data.read(size)
+        num_funcs = len(raw) // 8
+        fmt = f"!{num_funcs}Q"
+        fdata[PipeRPC.Command.FUNC_CALLERS] = struct.unpack(fmt, raw)
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_CALLEES.value + 1
+        raw = data.read(size)
+        num_funcs = len(raw) // 8
+        fmt = f"!{num_funcs}Q"
+        fdata[PipeRPC.Command.FUNC_CALLEES] = struct.unpack(fmt, raw)
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_XREFS.value + 1
+        raw = data.read(size)
+        struct_size = 17
+        num_refs = len(raw) // struct_size
+        fdata[PipeRPC.Command.FUNC_XREFS] = list()
+        for i in range(num_refs):
+            type_, to, from_ = struct.unpack("!BQQ", raw[i*struct_size: (i+1)*struct_size])
+            fdata[PipeRPC.Command.FUNC_XREFS].append(Reference(
+                from_=from_,
+                type=RefType(type_),
+                to=to
+            ))
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.DECOMP.value + 1
+        fdata[PipeRPC.Command.DECOMP] = str(data.read(size), 'utf8')
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_VARS.value + 1
+        fdata[PipeRPC.Command.FUNC_VARS] = list()
+        raw = data.read(size)
+        curr = 0
+        while(curr < len(raw)):
+            size = struct.unpack("!I", raw[curr:curr+4])[0]
+            var_data = raw[curr+4 : curr+4+size]
+            dtype, name = self._unpack_str_list(var_data[:-6])
+            v = Variable(
+                data_type=dtype,
+                name=name,
+                is_register=bool(var_data[-6]),
+                is_stack=bool(var_data[-5])
+            )
+            if v.is_stack:
+                v.stack_offset = struct.unpack("!I", var_data[-4:])[0]
+            
+            fdata[PipeRPC.Command.FUNC_VARS].append(v)
+            curr = curr + 4 + size
+
+        cmd, size = struct.unpack(wrap_fmt, data.read(5))
+        assert cmd == PipeRPC.Command.FUNC_IS_THUNK.value + 1
+        fdata[PipeRPC.Command.FUNC_IS_THUNK] = bool(data.read(size))
+
+        fdata["instructions"] = dict()
+        fdata[PipeRPC.Command.FUNC_BB] = list()
+        while data.tell() < len(fbatch): #data_size > 0:
+            cmd, size = struct.unpack(wrap_fmt, data.read(5))
+            assert cmd == PipeRPC.Command.FUNC_BB.value + 1
+            bb_addr = struct.unpack("!Q", data.read(size))[0]
+            fdata[PipeRPC.Command.FUNC_BB].append(bb_addr)
+
+            cmd, size = struct.unpack(wrap_fmt, data.read(5))
+            assert cmd == PipeRPC.Command.BB_BRANCHES.value + 1
+            bb_branches = list()
+            raw = data.read(size)
+            struct_size = 9
+            n = len(raw) // struct_size
+            for i in range(n):
+                flow, addr = struct.unpack("!BQ", raw[i*struct_size: (i+1)*struct_size])
+                bb_branches.append(Branch(
+                    type=BranchType(flow),
+                    target=addr
+                ))
+
+            fdata[bb_addr][PipeRPC.Command.BB_BRANCHES] = bb_branches
+            fdata[bb_addr][PipeRPC.Command.BB_INSTR] = list()
+
+            num_instr = struct.unpack("!I", data.read(4))[0]
+            for _ in range(num_instr):
+                cmd = struct.unpack("!B", data.read(1))[0]
+                assert cmd  == PipeRPC.Command.BB_INSTR.value + 1
+                
+                instr_addr = struct.unpack("!Q", data.read(8))[0]
+                instr_size = struct.unpack("!B", data.read(1))[0]
+                instructions = data.read(instr_size)
+                mnemonic_size = struct.unpack("!B", data.read(1))[0]
+                mnemonic = data.read(mnemonic_size)
+
+                cmd, size = struct.unpack(wrap_fmt, data.read(5))
+                assert cmd == PipeRPC.Command.INSTR_PCODE.value + 1
+                pcode = str(data.read(size), 'utf8')
+
+                cmd, size = struct.unpack(wrap_fmt, data.read(5))
+                assert cmd == PipeRPC.Command.INSTR_COMMENT.value + 1
+                comments = str(data.read(size), 'utf8')
+
+                fdata[bb_addr][PipeRPC.Command.BB_INSTR].append((instructions, str(mnemonic, 'utf8')))
+                
+                self._instruction_cache[instr_addr] = {
+                    PipeRPC.Command.INSTR_PCODE: pcode,
+                    PipeRPC.Command.INSTR_COMMENT: comments
+                }
+
+        return fdata

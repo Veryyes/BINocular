@@ -800,19 +800,18 @@ public class BinocularPipe extends GhidraScript{
 
     public byte[] entireFunction(Function f) throws CancelledException {
         int total_size = 5;
-        byte[][] functionData = {
-            this.getFunctionName(f).getBytes(),
-            this.packStringList(this.getFunctionArgs(f)),
-            this.getFunctionReturnType(f).getBytes(),
-            this.packInt(this.getFunctionStackFrameSize(f)),
-            this.packFunctionList(this.getFunctionCallers(f)),
-            this.packFunctionList(this.getFunctionCallees(f)),
-            this.packReferenceList(this.getFunctionXRefs(f)),
-            this.getFunctionDecompilation(f).getBytes(),
-            this.packVariableList(this.getFunctionVars(f)),
-            f.isThunk() ? new byte[]{1} : new byte[]{0}
-        };
-        
+        LinkedList<byte[]> functionData = new LinkedList<>();
+        functionData.add(this.basicPack((byte)(1+FUNC_NAME), this.getFunctionName(f).getBytes()));
+        functionData.add(this.basicPack((byte)(1+FUNC_ARGS), this.packStringList(this.getFunctionArgs(f))));
+        functionData.add(this.basicPack((byte)(1+FUNC_RETURN), this.getFunctionReturnType(f).getBytes()));
+        functionData.add(this.basicPack((byte)(1+FUNC_STACK_FRAME), this.packInt(this.getFunctionStackFrameSize(f))));
+        functionData.add(this.basicPack((byte)(1+FUNC_CALLERS), this.packFunctionList(this.getFunctionCallers(f))));
+        functionData.add(this.basicPack((byte)(1+FUNC_CALLEES), this.packFunctionList(this.getFunctionCallees(f))));
+        functionData.add(this.basicPack((byte)(1+FUNC_XREFS), this.packReferenceList(this.getFunctionXRefs(f))));
+        functionData.add(this.basicPack((byte)(1+DECOMP), this.getFunctionDecompilation(f).getBytes()));
+        functionData.add(this.basicPack((byte)(1+FUNC_VARS), this.packVariableList(this.getFunctionVars(f))));
+        functionData.add(this.basicPack((byte)(1+FUNC_IS_THUNK), f.isThunk() ? new byte[]{1} : new byte[]{0}));
+
         for(byte[] data: functionData){
             total_size += data.length;
         }
@@ -823,10 +822,14 @@ public class BinocularPipe extends GhidraScript{
             long bbAddr = blk.getFirstStartAddress().getOffset();
             byte[] branches = this.packCodeBlockRef(this.getBasicBlockBranches(blk));
 
-            data.add(this.basicPack(FUNC_BB, this.packLong(bbAddr)));
-            data.add(this.basicPack(BB_BRANCHES, branches));
+            data.add(this.basicPack((byte)(1+FUNC_BB), this.packLong(bbAddr)));
+            data.add(this.basicPack((byte)(1+BB_BRANCHES), branches));
             
-            for (Instruction instr: this.getBasicBlockInstructions(blk)){
+            List<Instruction> bbInstructions = this.getBasicBlockInstructions(blk);
+            
+            data.add(this.packInt(bbInstructions.size()));
+
+            for (Instruction instr: bbInstructions){
                 long instrAddr = instr.getAddress().getOffset();
                 byte[] instrBytes;
                 try{
@@ -835,7 +838,10 @@ public class BinocularPipe extends GhidraScript{
                     instrBytes = new byte[]{0};
                 }
 
-                ByteBuffer buff = ByteBuffer.allocate(2 + instrBytes.length + instr.getMnemonicString().getBytes().length);
+                ByteBuffer buff = ByteBuffer.allocate(11 + instrBytes.length + instr.getMnemonicString().getBytes().length);
+                
+                buff.put((byte)(BB_INSTR+1));
+                buff.put(this.packLong(instrAddr));
                 buff.put((byte)instrBytes.length);
                 buff.put(instrBytes);
                 buff.put((byte)instr.getMnemonicString().getBytes().length);
@@ -843,8 +849,8 @@ public class BinocularPipe extends GhidraScript{
                 
                 data.add(buff.array());
 
-                data.add(this.basicPack(INSTR_PCODE, this.getIR(instr.getAddress()).getBytes()));
-                data.add(this.basicPack(INSTR_COMMENT, this.getComments(instr.getAddress()).getBytes()));
+                data.add(this.basicPack((byte)(1+INSTR_PCODE), this.getIR(instr.getAddress()).getBytes()));
+                data.add(this.basicPack((byte)(1+INSTR_COMMENT), this.getComments(instr.getAddress()).getBytes()));
             }
         }
 
@@ -854,7 +860,7 @@ public class BinocularPipe extends GhidraScript{
 
         int curr = 1;
         byte[] out = new byte[total_size];
-        out[0] = FUNC_BATCH;
+        out[0] = FUNC_BATCH + 1;
         System.arraycopy(this.packInt(total_size), 0, out, curr, 4);
         curr = 5;
 
