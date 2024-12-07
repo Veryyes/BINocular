@@ -92,7 +92,6 @@ public class BinocularPipe extends GhidraScript{
     final byte INSTR_COMMENT = 52;
     final byte STRINGS = 54;
     final byte FUNC_IS_THUNK = 56;
-    final byte FUNC_BATCH = 58;
 
     // XRef Types
     final byte UNKNOWN = 0;
@@ -333,8 +332,6 @@ public class BinocularPipe extends GhidraScript{
                 return f.isThunk() ? new byte[]{1} : new byte[]{0};
             case SECTIONS:
                 return this.packSection(this.getSections());
-            case FUNC_BATCH:
-                return this.entireFunction(f);
             default:
                 return null;
         }
@@ -797,78 +794,4 @@ public class BinocularPipe extends GhidraScript{
 
         return String.join("\n", comments);
     }
-
-    public byte[] entireFunction(Function f) throws CancelledException {
-        int total_size = 5;
-        byte[][] functionData = {
-            this.getFunctionName(f).getBytes(),
-            this.packStringList(this.getFunctionArgs(f)),
-            this.getFunctionReturnType(f).getBytes(),
-            this.packInt(this.getFunctionStackFrameSize(f)),
-            this.packFunctionList(this.getFunctionCallers(f)),
-            this.packFunctionList(this.getFunctionCallees(f)),
-            this.packReferenceList(this.getFunctionXRefs(f)),
-            this.getFunctionDecompilation(f).getBytes(),
-            this.packVariableList(this.getFunctionVars(f)),
-            f.isThunk() ? new byte[]{1} : new byte[]{0}
-        };
-        
-        for(byte[] data: functionData){
-            total_size += data.length;
-        }
-
-        LinkedList<byte[]> data = new LinkedList<>();
-
-        for (CodeBlock blk: this.getFunctionBasicBlocks(f)){
-            long bbAddr = blk.getFirstStartAddress().getOffset();
-            byte[] branches = this.packCodeBlockRef(this.getBasicBlockBranches(blk));
-
-            data.add(this.basicPack(FUNC_BB, this.packLong(bbAddr)));
-            data.add(this.basicPack(BB_BRANCHES, branches));
-            
-            for (Instruction instr: this.getBasicBlockInstructions(blk)){
-                long instrAddr = instr.getAddress().getOffset();
-                byte[] instrBytes;
-                try{
-                    instrBytes = instr.getBytes();
-                }catch (MemoryAccessException e){
-                    instrBytes = new byte[]{0};
-                }
-
-                ByteBuffer buff = ByteBuffer.allocate(2 + instrBytes.length + instr.getMnemonicString().getBytes().length);
-                buff.put((byte)instrBytes.length);
-                buff.put(instrBytes);
-                buff.put((byte)instr.getMnemonicString().getBytes().length);
-                buff.put(instr.getMnemonicString().getBytes());
-                
-                data.add(buff.array());
-
-                data.add(this.basicPack(INSTR_PCODE, this.getIR(instr.getAddress()).getBytes()));
-                data.add(this.basicPack(INSTR_COMMENT, this.getComments(instr.getAddress()).getBytes()));
-            }
-        }
-
-        for (byte[] d: data){
-            total_size += d.length;
-        }
-
-        int curr = 1;
-        byte[] out = new byte[total_size];
-        out[0] = FUNC_BATCH;
-        System.arraycopy(this.packInt(total_size), 0, out, curr, 4);
-        curr = 5;
-
-        for(byte[] fData: functionData){
-            System.arraycopy(fData, 0, out, curr, fData.length);
-            curr += fData.length;
-        }
-
-        for(byte[] d: data){
-            System.arraycopy(d, 0, out, curr, d.length);
-            curr += d.length;
-        }
-
-        return out;
-    }
-
 }

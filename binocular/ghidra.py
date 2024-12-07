@@ -586,13 +586,7 @@ class Ghidra(Disassembler):
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
-        name =  str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
-        # fbatch = self.rpc_pipe.request(PipeRPC.Command.FUNC_BATCH, f_addr=addr)
-        
-        # import IPython
-        # IPython.embed()
-        # exit(1)
-        return name
+        return str(self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), 'utf8')
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
