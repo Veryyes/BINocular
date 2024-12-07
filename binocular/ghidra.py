@@ -149,15 +149,20 @@ class StdoutMonitor(threading.Thread):
         self.proc:subprocess.Popen = None
         self.verbose = verbose
         self.output = queue.Queue()
-    
+        self.running = False
 
     def run(self):
         if self.proc is None:
             return
 
+        self.running = True
+
         lines = iter(self.proc.stdout.readline, b"")
 
         while self.proc.poll() is None:
+            if not self.running:
+                return
+
             try:
                 line = str(next(lines), 'utf8').strip()
 
@@ -167,6 +172,9 @@ class StdoutMonitor(threading.Thread):
                 self.output.put(line)
             except StopIteration:
                 time.sleep(.10)
+
+    def stop(self):
+        self.running = False
 
     def readline(self):
         return self.output.get()
@@ -396,7 +404,7 @@ class Ghidra(Disassembler):
 
         self.ghidra_proc = None
         self.rpc_pipe = None
-        self.stdout_monitor = StdoutMonitor(self.verbose)
+        self.stdout_monitor = None
 
         self.save_on_close = save_on_close
 
@@ -419,10 +427,14 @@ class Ghidra(Disassembler):
         if self.ghidra_proc is not None:
             try:
                 pipe_dead = False
-                while self.stdout_monitor.lines_left() > 0:
-                    pipe_dead = "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor.readline()
-                    break
-                
+
+                if self.stdout_monitor:
+                    while self.stdout_monitor.lines_left() > 0:
+                        pipe_dead = "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor.readline()
+                        break
+                    
+                    self.stdout_monitor.stop()
+
                 if not pipe_dead:
                     logger.info("Closing RPC Pipe...")
                     self.rpc_pipe.request(PipeRPC.Command.QUIT)
@@ -442,6 +454,9 @@ class Ghidra(Disassembler):
 
         exit_code = self.ghidra_proc.poll()
         assert exit_code is not None
+        if self.stdout_monitor:
+            self.stdout_monitor.join()
+            self.stdout_monitor = None
         logger.info(f"Ghidra Process has exited: {exit_code}")
 
     def analysis_timeout(self, bin_size) -> int:
@@ -507,6 +522,7 @@ class Ghidra(Disassembler):
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE
         )
+        self.stdout_monitor = StdoutMonitor(self.verbose)
         self.stdout_monitor.proc = self.ghidra_proc
         self.stdout_monitor.start()
         

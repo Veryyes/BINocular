@@ -119,10 +119,10 @@ def test_function(make):
         assert ", ".join([str(x) for x in f.argv]) == form.argv
 
         f = g.function_sym('main')
-        assert g.function_sym('foo') in f.calls
-        assert g.function_sym('fib') in f.calls
+        assert g.function_sym('foo') in [x for x in f.calls]
+        assert g.function_sym('fib') in [x for x in f.calls]
         
         # Recursive, so itself should be a caller and calls
         f = g.function_sym('fib')
-        assert f in f.callers
-        assert f in f.calls
+        assert f in [x for x in f.callers]
+        assert f in [x for x in f.calls]
