@@ -168,9 +168,6 @@ class StdoutMonitor(threading.Thread):
             except StopIteration:
                 time.sleep(.10)
 
-        if self.verbose:
-            logger.info("GHIDRA DONE")
-
     def readline(self):
         return self.output.get()
 
@@ -367,13 +364,15 @@ class Ghidra(Disassembler):
     
     def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home:str=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
+        
         # TODO they arent used
         self.jvm_args = jvm_args
         if self.jvm_args is None:
             self.jvm_args = list()
 
-        self.ghidra_url = ghidra_url
         # TODO assert check
+        # TODO unconfirmed this will work with a ghidra server
+        self.ghidra_url = ghidra_url
 
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH()
@@ -629,9 +628,6 @@ class Ghidra(Disassembler):
 
         for i in range(n_funcs):
             f = struct.unpack("!Q", raw[i*8:(i+1)*8])[0]
-
-            if self.batch_loading:
-                self._function_cache[f] = self.get_function_data(f)
 
             yield f
 
