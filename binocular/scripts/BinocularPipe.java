@@ -1,11 +1,3 @@
-/*
- Initialize all resources needed
- Open up a named pipe specified by the parameters it gets called with
- Wait for input and handle it
-    essentially an rpc implementation of disassembler.py
- */
-
-//Makes functions out of a run of selected ARM or Thumb function pointers 
 //@category BINocular
 
 import java.net.ServerSocket;
@@ -66,37 +58,6 @@ import ghidra.util.exception.CancelledException;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
 
-class BINVariable{
-    public String type;
-    public String name;
-    public boolean isRegister;
-    public boolean isStack;
-    public int stackOffset;
-
-    public BINVariable(String type, String name, boolean isRegister, boolean isStack){
-        this.type = type;
-        this.name = name;
-        this.isRegister = isRegister;
-        this.isStack = isStack;
-        this.stackOffset = 0;
-    }
-
-    public byte[] getBytes(){
-        int lengths = this.type.length() + this.name.length() + 2;
-
-        ByteBuffer buf = ByteBuffer.allocate(lengths + 6);
-        buf.order(ByteOrder.BIG_ENDIAN);
-        buf.put(this.type.getBytes());
-        buf.put((byte)0);
-        buf.put(this.name.getBytes());
-        buf.put((byte)0);
-        buf.put(this.isRegister ? (byte)1 : (byte)0);
-        buf.put(this.isStack ? (byte)1 : (byte)0);
-        buf.putInt(this.stackOffset);
-
-        return buf.array();
-    }
-}
 
 public class BinocularPipe extends GhidraScript{
     // Fuck enums
@@ -158,6 +119,38 @@ public class BinocularPipe extends GhidraScript{
     HashMap<Function, DecompileResults> decompCache = new HashMap<>();
     int timeout;
 
+    private class BINVariable{
+        public String type;
+        public String name;
+        public boolean isRegister;
+        public boolean isStack;
+        public int stackOffset;
+
+        public BINVariable(String type, String name, boolean isRegister, boolean isStack){
+            this.type = type;
+            this.name = name;
+            this.isRegister = isRegister;
+            this.isStack = isStack;
+            this.stackOffset = 0;
+        }
+
+        public byte[] getBytes(){
+            int lengths = this.type.length() + this.name.length() + 2;
+
+            ByteBuffer buf = ByteBuffer.allocate(lengths + 6);
+            buf.order(ByteOrder.BIG_ENDIAN);
+            buf.put(this.type.getBytes());
+            buf.put((byte)0);
+            buf.put(this.name.getBytes());
+            buf.put((byte)0);
+            buf.put(this.isRegister ? (byte)1 : (byte)0);
+            buf.put(this.isStack ? (byte)1 : (byte)0);
+            buf.putInt(this.stackOffset);
+
+            return buf.array();
+        }
+    }
+
     @Override
     public void run() throws Exception{
         String[] args = this.getScriptArgs();
@@ -193,7 +186,6 @@ public class BinocularPipe extends GhidraScript{
             }
             
         }
-
     }
 
     private boolean handleClient(BufferedInputStream in, BufferedOutputStream out) throws IOException{
@@ -229,31 +221,34 @@ public class BinocularPipe extends GhidraScript{
             error = true;
             response = e.toString().getBytes();
         }
-        
-        if (response == null){
-            res_size = 0;
-        }else{
-            res_size = response.length;
+
+        byte resType = ERROR;
+        if (!error){
+            resType = (byte)(id + 1);
         }
 
+        byte[] raw = this.basicPack(resType, response);
 
-        ByteBuffer out_buff = ByteBuffer.allocate(res_size + 5);
-        out_buff.order(ByteOrder.BIG_ENDIAN);
-        if (error){
-            out_buff.put(ERROR);    
-        }else{
-            out_buff.put((byte)(id+1));
-        }
-        out_buff.putInt(res_size);
-        if (res_size > 0)
-            out_buff.put(response);
-
-        byte[] raw = out_buff.array();
         out.write(raw, 0, raw.length);
         out.flush();
         
-
         return running;
+    }
+
+    private byte[] basicPack(byte type, byte[] data){
+        int size = 0;
+        if (data != null)
+            size = data.length;
+
+        ByteBuffer out = ByteBuffer.allocate(size + 5);
+        out.order(ByteOrder.BIG_ENDIAN);
+
+        out.put(type);
+        out.putInt(size);
+        if (size > 0)
+            out.put(data);
+
+        return out.array();
     }
 
     private byte[] handleCommand(int id, long bbAddr, long funcAddr, long instrAddr) throws CancelledException{
@@ -799,5 +794,4 @@ public class BinocularPipe extends GhidraScript{
 
         return String.join("\n", comments);
     }
-
 }

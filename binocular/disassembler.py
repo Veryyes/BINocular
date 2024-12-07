@@ -69,6 +69,8 @@ class Disassembler(ABC):
         self._create_binary()
         self._create_functions()
         self.binary.functions = self.functions
+        for f in self.binary.functions:
+            self.binary._function_lookup[f.address] = f
         self._post_normalize()
         logger.info(
             f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
@@ -126,7 +128,6 @@ class Disassembler(ABC):
                 variables=[v for v in self.get_func_vars(addr, func_ctxt)]
             )
             f._binary = self.binary
-            f._context = func_ctxt
 
             count += 1
 

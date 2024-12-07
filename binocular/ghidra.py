@@ -14,6 +14,7 @@ import re
 import subprocess
 import struct
 import threading
+import queue
 import time
 from enum import Enum
 import socket
@@ -65,6 +66,7 @@ class PipeRPC:
         INSTR_COMMENT = 52
         STRINGS = 54
         FUNC_IS_THUNK = 56
+        FUNC_BATCH = 58
         
 
     # Requests will have no length. Size is known
@@ -117,7 +119,7 @@ class PipeRPC:
         self.sock.sendall(msg)
 
         header = b""
-        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE)
+        header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
         
         if res_id != id + 1:
@@ -131,7 +133,7 @@ class PipeRPC:
 
         return b""
 
-    def _recv_bytes(self, sock:socket.socket, size:int, timeout:int=60):
+    def _recv_bytes(self, sock:socket.socket, size:int, timeout:int):
         data = b""
         start = time.time()
         while len(data) < size:
@@ -140,6 +142,45 @@ class PipeRPC:
                 raise TimeoutError
 
         return data
+
+class StdoutMonitor(threading.Thread):
+    def __init__(self, verbose:bool=False):
+        super().__init__()
+        self.proc:subprocess.Popen = None
+        self.verbose = verbose
+        self.output = queue.Queue()
+        self.running = False
+
+    def run(self):
+        if self.proc is None:
+            return
+
+        self.running = True
+
+        lines = iter(self.proc.stdout.readline, b"")
+
+        while self.proc.poll() is None:
+            if not self.running:
+                return
+
+            try:
+                line = str(next(lines), 'utf8').strip()
+
+                if self.verbose:
+                    logger.info(line)
+
+                self.output.put(line)
+            except StopIteration:
+                time.sleep(.10)
+
+    def stop(self):
+        self.running = False
+
+    def readline(self):
+        return self.output.get()
+
+    def lines_left(self):
+        return self.output.qsize()
 
 class Ghidra(Disassembler):
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
@@ -329,15 +370,17 @@ class Ghidra(Disassembler):
         return os.path.exists(release_install) or os.path.exists(build_install)
 
     
-    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home=None, save_on_close=False, jvm_args: Iterable[str] = None):
+    def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home:str=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
-
+        
+        # TODO they arent used
         self.jvm_args = jvm_args
         if self.jvm_args is None:
             self.jvm_args = list()
 
-        self.ghidra_url = ghidra_url
         # TODO assert check
+        # TODO unconfirmed this will work with a ghidra server
+        self.ghidra_url = ghidra_url
 
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH()
@@ -361,9 +404,9 @@ class Ghidra(Disassembler):
 
         self.ghidra_proc = None
         self.rpc_pipe = None
+        self.stdout_monitor = None
 
         self.save_on_close = save_on_close
-        self.decomp_timeout = 60
 
     def _analyze_headless_path(self):
         return os.path.join(
@@ -383,23 +426,45 @@ class Ghidra(Disassembler):
 
         if self.ghidra_proc is not None:
             try:
-                self.rpc_pipe.request(PipeRPC.Command.QUIT)
-                self.rpc_pipe.close()
-                out, err = self.ghidra_proc.communicate(timeout=5)
+                pipe_dead = False
+
+                if self.stdout_monitor:
+                    while self.stdout_monitor.lines_left() > 0:
+                        pipe_dead = "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor.readline()
+                        break
+                    
+                    self.stdout_monitor.stop()
+
+                if not pipe_dead:
+                    logger.info("Closing RPC Pipe...")
+                    self.rpc_pipe.request(PipeRPC.Command.QUIT)
+                    self.rpc_pipe.close()
+
+                logger.info("Waiting on Ghidra to exit...")
+                out, err = self.ghidra_proc.communicate(timeout=1)
                 if self.verbose:
                     if len(out) > 0:
                         logger.info(str(out, 'utf8'))
                     if len(err) > 0:
                         logger.warning(str(err, 'utf8'))
                 
-            except TimeoutError:
+            except subprocess.TimeoutExpired:
                 self.ghidra_proc.kill()
                 logger.warning("Killed Ghidra Process. Took Too long")
 
-        # if self.stdout_reader.is_alive:
-        #     self.stdout_reader.join()
+        exit_code = self.ghidra_proc.poll()
+        assert exit_code is not None
+        if self.stdout_monitor:
+            self.stdout_monitor.join()
+            self.stdout_monitor = None
+        logger.info(f"Ghidra Process has exited: {exit_code}")
 
-    def analyze(self, path) -> bool:
+    def analysis_timeout(self, bin_size) -> int:
+        # 30s + 
+        # 1 minutes per 500KB
+        return round(30 + 60 * (bin_size/(1024))**2)
+
+    def analyze(self, path) -> Tuple[bool, Optional[str]]:
         '''
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
@@ -428,8 +493,7 @@ class Ghidra(Disassembler):
             os.makedirs(self.project_location, exist_ok=True)
             cmd += [self.project_location, self.project_name]
 
-        # 30s + 1 minutes per 500KB
-        self.rpc_pipe = PipeRPC(timeout = round(30 + 60 * (bin_size/(1024*500))))
+        self.rpc_pipe = PipeRPC(timeout = self.analysis_timeout(bin_size))
 
         # Import a new File into Ghidra
         # if we already imported it, this will fail and nothing bad happens
@@ -449,24 +513,38 @@ class Ghidra(Disassembler):
             "-scriptPath", Ghidra.SCRIPT_PATH(),
             "-postScript", "BinocularPipe.java", self.rpc_pipe.gscript_ip, str(self.rpc_pipe.port)
         ]
-        # print(" ".join(cmd))
+        
+        if self.verbose:
+            logger.info("$ " + " ".join(cmd))
+
         self.ghidra_proc = subprocess.Popen(
             cmd,
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE
         )
-
-        # If you wanna see java's stdout
-        # def getoutput(proc):
-        #     for line in iter(proc.stdout.readline, b""):
-        #         logger.info(str(line, 'utf8').strip())
-        #     logger.info("GHIDRA DONE")
-
-        # self.stdout_reader = threading.Thread(target=getoutput, args=(self.ghidra_proc,))
-        # if self.verbose:
-        #     self.stdout_reader.start()
+        self.stdout_monitor = StdoutMonitor(self.verbose)
+        self.stdout_monitor.proc = self.ghidra_proc
+        self.stdout_monitor.start()
         
-        return True, None
+        start = time.time()
+        timedout = False
+        while (timedout := (time.time() - start < self.analysis_timeout(bin_size)) and self.ghidra_proc.poll() is None):
+            if self.stdout_monitor.lines_left() > 0:
+                line = self.stdout_monitor.readline()
+                if "Analysis succeeded for file" in line:
+                    return True, None
+
+            time.sleep(.01)
+
+        if timedout:
+            return False, "Analyze Headless Timedout"
+
+        # if process is exited
+        exit_code = self.ghidra_proc.poll()
+        if exit_code is not None:
+            return False, f"Analyze Headless exited with code: {exit_code}"
+
+        return False, "Analyze Headless in Weird State"
 
     @staticmethod
     def _unpack_str_list(raw:bytes) -> List[str]:
@@ -484,7 +562,6 @@ class Ghidra(Disassembler):
         '''Returns the name of the binary loaded'''
         return str(self.rpc_pipe.request(PipeRPC.Command.BINARY_NAME), 'utf8')
 
-
     def get_entry_point(self) -> int:
         '''Returns the address of the entry point to the function'''
         return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.Command.ENTRY_POINT))[0]
@@ -499,7 +576,7 @@ class Ghidra(Disassembler):
 
     def get_endianness(self) -> Endian:
         '''Returns an Enum representing the Endianness'''
-        endian = str(self.rpc_pipe.request(PipeRPC.Command.ARCHITECTURE), 'utf8').lower()
+        endian = str(self.rpc_pipe.request(PipeRPC.Command.ENDIANNESS), 'utf8').lower()
         if endian == 'little':
             return Endian.LITTLE
         elif endian == 'big':
@@ -567,13 +644,14 @@ class Ghidra(Disassembler):
 
         for i in range(n_funcs):
             f = struct.unpack("!Q", raw[i*8:(i+1)*8])[0]
+
             yield f
 
 
     def get_func_addr(self, func_ctxt: int) -> int:
         '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
         # Here, func_ctxt is the address
-        return func_ctxt
+        return func_ctxt   
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
