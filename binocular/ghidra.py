@@ -437,7 +437,10 @@ class Ghidra(Disassembler):
 
                 if not pipe_dead:
                     logger.info("Closing RPC Pipe...")
-                    self.rpc_pipe.request(PipeRPC.Command.QUIT)
+                    try:
+                        self.rpc_pipe.request(PipeRPC.Command.QUIT)
+                    except TimeoutError:
+                        logger.warn("Encountered Timeout on PipeRPC graceful quit")
                     self.rpc_pipe.close()
 
                 logger.info("Waiting on Ghidra to exit...")
