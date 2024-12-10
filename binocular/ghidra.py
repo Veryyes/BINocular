@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections.abc import Iterable
 from collections import OrderedDict
-from typing import Any, Optional, Tuple, List, IO
+from typing import Any, Optional, Tuple, List, IO, Callable
 import pkgutil
 import os
 import tempfile
@@ -149,6 +149,7 @@ class StdoutMonitor(threading.Thread):
         self.proc:subprocess.Popen = None
         self.verbose = verbose
         self.output = queue.Queue()
+        self.stdout = list()
         self.running = False
 
     def run(self):
@@ -165,7 +166,6 @@ class StdoutMonitor(threading.Thread):
 
             try:
                 line = str(next(lines), 'utf8').strip()
-
                 if self.verbose:
                     logger.info(line)
 
@@ -177,7 +177,9 @@ class StdoutMonitor(threading.Thread):
         self.running = False
 
     def readline(self):
-        return self.output.get()
+        line = self.output.get()
+        self.stdout.append(line)
+        return line
 
     def lines_left(self):
         return self.output.qsize()
@@ -426,7 +428,7 @@ class Ghidra(Disassembler):
 
         if self.ghidra_proc is not None:
             try:
-                pipe_dead = False
+                pipe_dead = not self.rpc_pipe.is_connected
 
                 if self.stdout_monitor:
                     while self.stdout_monitor.lines_left() > 0:
@@ -440,7 +442,9 @@ class Ghidra(Disassembler):
                     self.rpc_pipe.request(PipeRPC.Command.QUIT)
                     self.rpc_pipe.close()
 
-                logger.info("Waiting on Ghidra to exit...")
+                if self.ghidra_proc.poll() is None:
+                    logger.info("Waiting on Ghidra to exit...")
+
                 out, err = self.ghidra_proc.communicate(timeout=1)
                 if self.verbose:
                     if len(out) > 0:
@@ -470,17 +474,6 @@ class Ghidra(Disassembler):
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: True on success, false otherwise
         '''
-        bin_size = 0
-        m = hashlib.md5()
-        with open(path, 'rb') as f:
-            chunk = f.read(4096)
-            while chunk:
-                m.update(chunk)
-                bin_size += len(chunk)
-                chunk = f.read(4096)
-            
-        md5hash = m.hexdigest()
-
         cmd = [self._analyze_headless_path()]
         if self.ghidra_url is not None:
             cmd.append(self.ghidra_url)
@@ -488,12 +481,12 @@ class Ghidra(Disassembler):
             # Containing folder of the project is the same name of the project
             # A little cleaner to handle when you can just rm the <md5sum>/ to 
             # delete a whole project if need be
-            self.project_location = os.path.join(self.base_project_path, md5hash)
-            self.project_name = md5hash
+            self.project_location = os.path.join(self.base_project_path, self.md5hash)
+            self.project_name = self.md5hash
             os.makedirs(self.project_location, exist_ok=True)
             cmd += [self.project_location, self.project_name]
 
-        self.rpc_pipe = PipeRPC(timeout = self.analysis_timeout(bin_size))
+        self.rpc_pipe = PipeRPC(timeout = self.analysis_timeout(self.bin_size))
 
         # Import a new File into Ghidra
         # if we already imported it, this will fail and nothing bad happens
@@ -528,7 +521,7 @@ class Ghidra(Disassembler):
         
         start = time.time()
         timedout = False
-        while (timedout := (time.time() - start < self.analysis_timeout(bin_size)) and self.ghidra_proc.poll() is None):
+        while (timedout := (time.time() - start < self.analysis_timeout(self.bin_size)) and self.ghidra_proc.poll() is None):
             if self.stdout_monitor.lines_left() > 0:
                 line = self.stdout_monitor.readline()
                 if "Analysis succeeded for file" in line:
@@ -542,7 +535,9 @@ class Ghidra(Disassembler):
         # if process is exited
         exit_code = self.ghidra_proc.poll()
         if exit_code is not None:
-            return False, f"Analyze Headless exited with code: {exit_code}"
+            stdout, stderr = self.ghidra_proc.communicate()
+            already_printed ='\n'.join(self.stdout_monitor.stdout)
+            return False, f"{already_printed}{str(stdout, 'utf8')}\n{str(stderr, 'utf8')}"
 
         return False, "Analyze Headless in Weird State"
 
@@ -791,3 +786,60 @@ class Ghidra(Disassembler):
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
         return str(self.rpc_pipe.request(PipeRPC.Command.INSTR_COMMENT, instr_addr=instr_addr), "utf8")
+
+    def run_script(self, script_path:str, callback:Callable=None, data:Any=None, timeout:float=None, *script_args):
+        cmd = [self._analyze_headless_path()]
+        self.project_location = os.path.join(self.base_project_path, self.md5hash)
+        self.project_name = self.md5hash
+        assert os.path.exists(self.project_location)
+        
+        cmd += [self.project_location, self.project_name]
+
+        cmd += [
+            "-process", os.path.basename(self._binary_filepath),
+            "-scriptPath", os.path.dirname(script_path),
+            "-postScript", os.path.basename(self._binary_filepath), *script_args
+        ]
+        
+        if self.verbose:
+            logger.info("$ " + " ".join(cmd))
+
+        self.ghidra_proc = subprocess.Popen(
+            cmd,
+            stdout = subprocess.PIPE,
+            stderr = subprocess.PIPE
+        )
+        script_monitor = StdoutMonitor(self.verbose)
+        script_monitor.proc = self.ghidra_proc
+        script_monitor.start()
+        
+        start = time.time()
+        timedout = False
+        if timeout is None:
+            timeout = self.analysis_timeout(self.bin_size)
+        stdout = []
+        while (timedout := (time.time() - start < timeout) and self.ghidra_proc.poll() is None):
+            if script_monitor.lines_left() > 0:
+                line = script_monitor.readline()
+                stdout.append(line)
+                if "REPORT: Post-analysis succeeded for file" in line:
+                    while script_monitor.lines_left() > 0:
+                        stdout.append(script_monitor.readline())
+
+                    if callback is not None:
+                        callback(stdout, data)
+
+                    script_monitor.stop()
+                    script_monitor.join()
+                    
+                    return True, None
+
+            time.sleep(.01)
+
+        if timedout:
+            raise TimeoutError()
+
+        # if process is exited
+        exit_code = self.ghidra_proc.poll()
+        if exit_code is not None:
+            raise RuntimeError(f"Analyze Headless exited with code: {exit_code}")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import logging
+import hashlib
 import time
 import string
 from abc import ABC, abstractmethod
@@ -29,9 +29,9 @@ class Disassembler(ABC):
         pass
 
     def __init__(self, verbose=True):
-        self.verbose = verbose
-
-        self._bb_count = 0
+        self.verbose:bool = verbose
+        self._binary_filepath:str = None
+        self._bb_count:int = 0
         self._func_names: Dict[str, NativeFunction] = dict()
         self._func_addrs: Dict[int, NativeFunction] = dict()
         self._bbs: Dict[int, BasicBlock] = dict()
@@ -58,6 +58,18 @@ class Disassembler(ABC):
         self._binary_filepath = path
 
         start = time.time()
+
+        self.bin_size = 0
+        m = hashlib.md5()
+        with open(path, 'rb') as f:
+            chunk = f.read(4096)
+            while chunk:
+                m.update(chunk)
+                self.bin_size += len(chunk)
+                chunk = f.read(4096)
+            
+        self.md5hash = m.hexdigest()
+
         success, err_msg = self.analyze(self._binary_filepath)
         if not success:
             raise Disassembler.FailedToLoadBinary(err_msg)
@@ -361,6 +373,10 @@ class Disassembler(ABC):
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         '''Return comments at the instruction'''
+        return None
+
+    def run_script(self, script_path:str):
+        '''Run a Script in the Disassembler'''
         return None
 
     ############################################
