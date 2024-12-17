@@ -704,7 +704,10 @@ public class BinocularPipe extends GhidraScript{
         for(Address addr: f.getBody().getAddresses(true)){
             for(Reference ref: rm.getReferencesFrom(addr)){
                 if (ref.getReferenceType().isCall()){
-                    list.add(fm.getFunctionAt(ref.getToAddress()));
+                    Function callee = fm.getFunctionAt(ref.getToAddress());
+                    if (callee != null){
+                        list.add(callee);
+                    }
                 }
             }
         }
