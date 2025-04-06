@@ -11,7 +11,6 @@ setup(
         'typer',
         'pydantic',
         'networkx',
-        'checksec-py>=0.7.4',
         'SQLAlchemy',
         'coloredlogs',
         'archinfo',

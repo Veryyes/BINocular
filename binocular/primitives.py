@@ -14,7 +14,6 @@ from pydantic import BaseModel, computed_field, model_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import PlainValidator
 from pydantic.dataclasses import dataclass
-from checksec.elf import ELFSecurity, ELFChecksecData, PIEType, RelroType
 from sqlalchemy.engine.base import Engine
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -353,7 +352,6 @@ class BasicBlock(NativeCode):
     _function: Optional[NativeFunction] = None
 
     address: int = None
-    pie: PIEType = None
 
     instructions: List[Instruction] = list()
     branches: Set[Branch] = set()
@@ -374,7 +372,6 @@ class BasicBlock(NativeCode):
             architecture=orm.architecture,
             endianness=orm.endianness,
             bitness=orm.bitness,
-            pie=orm.pie,
             xrefs=set(Reference.from_orm(ref) for ref in orm.xrefs),
             branches=set(Branch.from_orm(b) for b in orm.branches)
         )
@@ -474,7 +471,6 @@ class BasicBlock(NativeCode):
             endianness=self.endianness,
             architecture=self.architecture,
             bitness=self.bitness,
-            pie=self.pie,
             size=len(self),
             xrefs=[xref.orm() for xref in self.xrefs],
             branches=[branch.orm() for branch in self.branches]
@@ -505,7 +501,6 @@ class NativeFunction(NativeCode):
     _binary: Binary = None
 
     address: Optional[int] = None
-    pie: Optional[PIEType] = None
     canary: Optional[bool] = None
     names: Optional[List[str]] = None
     return_type: Optional[str] = None
@@ -539,8 +534,6 @@ class NativeFunction(NativeCode):
             architecture=orm.architecture,
             endianness=orm.endianness,
             bitness=orm.bitness,
-            pie=orm.pie,
-            canary=orm.canary,
             sha256=orm.sha256,
             stack_frame_size=orm.stack_frame_size,
             return_type=orm.return_type,
@@ -693,8 +686,6 @@ class NativeFunction(NativeCode):
             architecture=self.architecture,
             bitness=self.bitness,
             address=self.address,
-            pie=self.pie,
-            canary=self.canary,
             sha256=self.sha256,
             return_type=self.return_type,
             thunk=self.thunk,
@@ -891,37 +882,6 @@ class SourceFunction(BaseModel):
         self._backend.disassembler = disassembler
 
 
-class Section(BaseModel):
-    name: str
-    type: str
-    start: int
-    offset: int
-    size: int
-    entsize: int = 0
-    link: int = 0
-    info: int = 0
-    align: int = 0
-
-    # flags
-    write: bool = False
-    alloc: bool = False
-    execute: bool = False
-    merge: bool = False
-    strings: bool = False
-    info_flag: bool = False
-    link_order: bool = False
-    extra_processing: bool = False
-    group: bool = False
-    tls: bool = False
-    compressed: bool = False
-    unknown: bool = False
-    os_specific: bool = False
-    exclude: bool = False
-    mbind: bool = False
-    large: bool = False
-    processor_specific: bool = False
-
-
 class Binary(NativeCode):
     '''
     Represents a Binary Blob or executable format. This maps 1 to 1 of what you'd load into a disassembler (e.g., ELF, PE, MACH-O, Firmware Dump, Binary Blob)
@@ -951,7 +911,6 @@ class Binary(NativeCode):
     entrypoint: Optional[int] = None
     os: Optional[str] = None
     base_addr: int = 0
-    sections: List[Section] = []
     dynamic_libs: Set[str] = set([])
     compiler: Optional[str] = None
     compilation_flags: Optional[str] = None
@@ -1002,17 +961,6 @@ class Binary(NativeCode):
             os=orm.os,
             base_addr=orm.base_addr,
             sha256=orm.sha256,
-            nx=orm.nx,
-            pie=orm.pie,
-            canary=orm.canary,
-            relro=orm.relro,
-            rpath=orm.rpath,
-            runpath=orm.runpath,
-            stripped=orm.stripped,
-            fortify=orm.fortify,
-            fortified=orm.fortified,
-            fortifiable=orm.fortifiable,
-            fortify_score=orm.fortify_score,
             tags=orm.tags.split(",")
         )
         b.set_path(orm.metainfo.path)
@@ -1082,17 +1030,6 @@ class Binary(NativeCode):
             compilation_flags=self.compilation_flags,
             dynamic_libs=",".join(list(self.dynamic_libs)),
             sha256=self.sha256,
-            nx=self.nx,
-            pie=self.pie,
-            canary=self.canary,
-            relro=self.relro,
-            rpath=self.rpath,
-            runpath=self.runpath,
-            stripped=self.stripped,
-            fortify=self.fortify,
-            fortified=self.fortified,
-            fortifiable=self.fortifiable,
-            fortify_score=self.fortify_score,
             tags=",".join(self.tags)
         )
 
@@ -1133,61 +1070,6 @@ class Binary(NativeCode):
         '''sha256 hex digest of the file'''
         return hashlib.sha256(bytes(self)).hexdigest()
 
-    @computed_field(repr=False)
-    @property
-    def nx(self) -> bool:
-        return self._checksec.nx
-
-    @computed_field(repr=False)
-    @property
-    def pie(self) -> PIEType:
-        return self._checksec.pie
-
-    @computed_field(repr=False)
-    @property
-    def canary(self) -> bool:
-        return self._checksec.canary
-
-    @computed_field(repr=False)
-    @property
-    def relro(self) -> RelroType:
-        return self._checksec.relro
-
-    @computed_field(repr=False)
-    @property
-    def rpath(self) -> bool:
-        return self._checksec.rpath
-
-    @computed_field(repr=False)
-    @property
-    def runpath(self) -> bool:
-        return self._checksec.runpath
-
-    @computed_field(repr=False)
-    @property
-    def stripped(self) -> bool:
-        return not self._checksec.symbols
-
-    @computed_field(repr=False)
-    @property
-    def fortify(self) -> bool:
-        return self._checksec.fortify_source
-
-    @computed_field(repr=False)
-    @property
-    def fortified(self) -> int:
-        return self._checksec.fortified
-
-    @computed_field(repr=False)
-    @property
-    def fortifiable(self) -> int:
-        return self._checksec.fortifiable
-
-    @computed_field(repr=False)
-    @property
-    def fortify_score(self) -> int:
-        return self._checksec.fortify_score
-
     def io(self) -> IO:
         '''returns a stream/IO handle to the bytes of the binary. This function does not self close the stream'''
         if self._path is not None:
@@ -1200,21 +1082,3 @@ class Binary(NativeCode):
 
         raise Binary.NoDataException("Binary Object has no Path or data")
 
-    @cached_property
-    def _checksec(self) -> ELFChecksecData:
-        fp = None
-        path = self._path
-
-        if self._path is None:
-            fp = self.io()
-            path = fp.name
-
-        # TODO
-        # This only works on ELFs. See PESecurity
-        elf = ELFSecurity(path)
-        cs = elf.checksec_state
-
-        if fp is not None:
-            fp.close()
-
-        return cs
