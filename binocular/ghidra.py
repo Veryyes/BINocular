@@ -85,6 +85,7 @@ class PipeRPC:
         self.timeout = timeout
 
     def connect(self):
+        assert self.proc.poll() == None
         logger.info(f"Attempting to Connect to: {self.gscript_ip}:{self.port}")
         waited = 0.0
         while not self.is_connected:
@@ -113,11 +114,14 @@ class PipeRPC:
                 
             self.connect()
 
+        assert self.proc.poll() == None
+        
         id = cmd.value
         msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr, instr_addr)
 
         self.sock.sendall(msg)
-
+        start = time.time()
+        logger.debug("Waiting on RPC response")
         header = b""
         header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
@@ -129,7 +133,9 @@ class PipeRPC:
             raise Exception(f"Recieved negative lengthed response")
 
         if size > 0:
-            return self._recv_bytes(self.sock, size, timeout=self.timeout)
+            res = self._recv_bytes(self.sock, size, timeout=self.timeout)
+            logger.debug(f"Recieved Response in {time.time()-start:2f}s")
+            return res
 
         return b""
 
@@ -142,7 +148,7 @@ class PipeRPC:
                 raise TimeoutError
 
         return data
-
+# TODO monitor for ERROR REPORT SCRIPT ERROR
 class StdoutMonitor(threading.Thread):
     def __init__(self, verbose:bool=False):
         super().__init__()
@@ -444,7 +450,7 @@ class Ghidra(Disassembler):
                     self.rpc_pipe.close()
 
                 logger.info("Waiting on Ghidra to exit...")
-                out, err = self.ghidra_proc.communicate(timeout=1)
+                out, err = self.ghidra_proc.communicate(timeout=5)
                 if self.verbose:
                     if len(out) > 0:
                         logger.info(str(out, 'utf8'))
@@ -456,7 +462,9 @@ class Ghidra(Disassembler):
                 logger.warning("Killed Ghidra Process. Took Too long")
 
         exit_code = self.ghidra_proc.poll()
-        assert exit_code is not None
+        if exit_code is not None:
+            self.ghidra_proc.kill()
+
         if self.stdout_monitor:
             self.stdout_monitor.join()
             self.stdout_monitor = None
@@ -525,6 +533,7 @@ class Ghidra(Disassembler):
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE
         )
+        self.rpc_pipe.proc = self.ghidra_proc
         self.stdout_monitor = StdoutMonitor(self.verbose)
         self.stdout_monitor.proc = self.ghidra_proc
         self.stdout_monitor.start()
@@ -545,7 +554,8 @@ class Ghidra(Disassembler):
         # if process is exited
         exit_code = self.ghidra_proc.poll()
         if exit_code is not None:
-            return False, f"Analyze Headless exited with code: {exit_code}"
+            stdout, stderr = self.ghidra_proc.communicate()
+            return False, str(stdout, 'utf8') + str(stderr, 'utf8') 
 
         return False, "Analyze Headless in Weird State"
 

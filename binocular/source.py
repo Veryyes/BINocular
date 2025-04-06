@@ -191,7 +191,7 @@ class C_Code:
                 arguments.append(dict(var_args=True))
                 continue
             else:
-                data_type = str(data_type_node.text,
+                data_type = str(data_type_node.text, # data_type_node is none 
                                 encoding=encoding) + "*"*ptr_count
 
             param_func_dec = get_child_by_type(next_n, 'function_declarator')
