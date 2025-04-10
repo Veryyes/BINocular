@@ -1,3 +1,5 @@
+from typing import Optional, List, Dict
+
 import tree_sitter_c
 import tree_sitter
 from tree_sitter import Language, Parser
@@ -9,7 +11,7 @@ def walk(root: tree_sitter.Node):
     visited_children = False
     while True:
         if not visited_children:
-            print(cursor.node.type, cursor.node.text)
+            # print(cursor.node.type, cursor.node.text)
             yield cursor.node
             if not cursor.goto_first_child():
                 visited_children = True
@@ -68,7 +70,7 @@ class C_Code:
     lang = Language(tree_sitter_c.language())
 
     @classmethod
-    def find_func(cls, function_name: str, source_code: bytes, encoding: str = 'utf8') -> tree_sitter.Node:
+    def find_func(cls, function_name: str, source_code: bytes, encoding: str = 'utf8') -> Optional[tree_sitter.Node]:
         '''Searches for the function definition node in tree sitter by function name'''
         parser = Parser(cls.lang)
         tree = parser.parse(source_code)
@@ -140,7 +142,8 @@ class C_Code:
 
         for child in func_def.children:
             if child.type == "storage_class_specifier" or child.type == "type_qualifier":
-                qualifiers.append(str(child.text, encoding=encoding))
+                if child.text is not None:
+                    qualifiers.append(str(child.text, encoding=encoding))
 
         fptr_ret = False
         if id_node is not None:
@@ -175,7 +178,7 @@ class C_Code:
         if param_list is None:
             raise ValueError("Cannot find parameters")
 
-        arguments = list()
+        arguments:List[Dict[str, str|bool]] = list()
         for param_dec in [node for node in param_list.children if node.type == "parameter_declaration"]:
             # Argument Name
             next_n = get_child_by_type(param_dec, 'pointer_declarator')

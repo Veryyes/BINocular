@@ -121,7 +121,6 @@ class PipeRPC:
 
         self.sock.sendall(msg)
         start = time.time()
-        logger.debug("Waiting on RPC response")
         header = b""
         header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
@@ -134,7 +133,7 @@ class PipeRPC:
 
         if size > 0:
             res = self._recv_bytes(self.sock, size, timeout=self.timeout)
-            logger.debug(f"Recieved Response in {time.time()-start:2f}s")
+            logger.info(f"Recieved {PipeRPC.Command(res_id-1).name} Response in {time.time()-start:2f}s")
             return res
 
         return b""

@@ -14,20 +14,17 @@ from pydantic import BaseModel, computed_field, model_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import PlainValidator
 from pydantic.dataclasses import dataclass
-from sqlalchemy.engine.base import Engine
-from sqlalchemy import create_engine
+
 from sqlalchemy.orm import Session
 import pyvex
-import lief
 
-from .db import Base, NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, BranchORM, MAX_STR_SIZE
+from .db import NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, BranchORM, MAX_STR_SIZE
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 from .source import C_Code
 
-lief.disable_leak_warning()
 
-parsers = defaultdict(lambda: None)
+parsers:Dict[str, Optional[Type]] = defaultdict(lambda: None)
 parsers['C'] = C_Code
 
 def bytes_validator(x:Union[bytes,bytearray,str]) -> bytes:
@@ -40,29 +37,6 @@ def bytes_validator(x:Union[bytes,bytearray,str]) -> bytes:
     raise ValueError(f"Does not appear to be bytes or hexstring: {x}")
 
 Bytes = Annotated[bytes, PlainValidator(bytes_validator), PlainSerializer(lambda x: x.hex())]
-
-class Backend:
-    '''
-    Wrapper for a sqlachemy.Engine
-    '''
-
-    engine: Engine = None
-
-    @classmethod
-    def set_engine(cls, db_uri: str) -> Engine:
-        if Backend.engine is None:
-            Backend.engine = create_engine(db_uri)
-            Base.metadata.create_all(Backend.engine)
-
-        return Backend.engine
-
-    def __init__(self, disassembler: 'Disassembler' = None):
-        self.disassembler = disassembler
-
-    @property
-    def db(self) -> Engine:
-        return Backend.engine
-
 
 class NoDBException(Exception):
     pass
@@ -250,8 +224,6 @@ class NativeCode(BaseModel):
 
 class Instruction(NativeCode):
     '''Represents a single instruction'''
-    _backend: Backend = Backend()
-
     address: Optional[int] = None
     data: Bytes
     asm: Optional[str] = ""
@@ -297,7 +269,10 @@ class Instruction(NativeCode):
     def __len__(self):
         return len(self.data)
 
-    def __eq__(self, other: Instruction):
+    def __eq__(self, other: object):
+        if not isinstance(other, Instruction):
+            return False
+            
         return self.data == other.data
 
     def __hash__(self):
@@ -347,11 +322,9 @@ class Instruction(NativeCode):
 
 class BasicBlock(NativeCode):
     '''Represents a Basic Block'''
-
-    _backend: Backend = Backend()
     _function: Optional[NativeFunction] = None
 
-    address: int = None
+    address: Optional[int] = None
 
     instructions: List[Instruction] = list()
     branches: Set[Branch] = set()
@@ -359,7 +332,7 @@ class BasicBlock(NativeCode):
     is_epilogue: Optional[bool] = False
     xrefs: Set[Reference] = set([])
 
-    _size_bytes: int = None
+    _size_bytes: Optional[int] = None
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -388,6 +361,8 @@ class BasicBlock(NativeCode):
             self.idx = 0
 
             self.block_cache = dict()
+            if block._function is None:
+                raise RuntimeError(f"BasicBlock {block.address} has no function associated with it")
             for bb in block._function.basic_blocks:
                 self.block_cache[bb.address] = bb
 
@@ -432,6 +407,8 @@ class BasicBlock(NativeCode):
         elif isinstance(x, bytes):
             return x in bytes(self)
         elif isinstance(x, int):
+            if self.address is None:
+                raise RuntimeError("BasicBlock has no address")
             return x >= self.address and x <= (self.address + len(self))
         raise TypeError
 
@@ -440,9 +417,6 @@ class BasicBlock(NativeCode):
         for instr in self.instructions:
             b += instr.data
         return b
-
-    def set_disassembler(self, disassembler: "Disassembler"):
-        self._backend.disassembler = disassembler
 
     def set_function(self, func: NativeFunction):
         self._function = func
@@ -489,22 +463,21 @@ class BasicBlock(NativeCode):
         for instr in bb.instructions:
             session.add(instr)
             if instr.ir is not None:
-                [session.add(ir) for ir in instr.ir]
+                for ir in instr.ir:
+                    session.add(ir)
 
 class NativeFunction(NativeCode):
     '''
     Represents a natively compiled function
     '''
-    _backend: Backend = Backend()
-
     _block_lookup: Dict[int, BasicBlock] = dict()
-    _binary: Binary = None
+    _binary: Optional[Binary] = None
 
     address: Optional[int] = None
     canary: Optional[bool] = None
     names: Optional[List[str]] = None
     return_type: Optional[str] = None
-    argv: List[Argument] = None
+    argv: List[Argument] = list()
     variables: List[Variable] = list()
     stack_frame_size: int = 0
     sources: Set[SourceFunction] = set([])
@@ -555,10 +528,13 @@ class NativeFunction(NativeCode):
     def __hash__(self):
         return int(self.sha256, 16)
 
-    def __eq__(self, other: NativeFunction) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, NativeFunction):
+            return False
+
         return hash(self) == hash(other)
 
-    def __ne__(self, other: NativeFunction) -> bool:
+    def __ne__(self, other: object) -> bool:
         return hash(self) != hash(other)
 
     def __contains__(self, x: Union[BasicBlock, Instruction, bytes]):
@@ -612,7 +588,7 @@ class NativeFunction(NativeCode):
     def cfg(self) -> nx.MultiDiGraph:
         '''Control Flow Graph of the Function'''
 
-        cfg = nx.MultiDiGraph()
+        cfg:nx.MultiDiGraph = nx.MultiDiGraph()
         self._cfg(set(), cfg, self.start())
 
         return cfg
@@ -642,38 +618,36 @@ class NativeFunction(NativeCode):
             xrefs |= bb.xrefs
         return xrefs
 
-    @computed_field(repr=False)
+    @computed_field(repr=False) # type: ignore[misc]
     @cached_property
     def sha256(self) -> str:
-        bbs = sorted(self.basic_blocks, key=lambda b: b.address)
+        bbs = sorted(self.basic_blocks, key=lambda b: 0 if b.address is None else b.address) 
         func_bytes = b"".join([bytes(bb) for bb in bbs])
         return hashlib.sha256(func_bytes).hexdigest()
 
     def disasm(self) -> str:
         '''Returns disassembled instructions from the lowest addressed basic block to the end of the largest addressed basic block'''
         bbs = [bb for bb in self.basic_blocks]
-        bbs = sorted(bbs, key=lambda b: b.address)
+        bbs = sorted(bbs, key=lambda b: 0 if b.address is None else b.address) 
 
         asm = []
         for bb in bbs:
             for instr in bb.instructions:
-                asm.append(instr.asm)
+                if instr.asm is not None:
+                    asm.append(instr.asm)
 
         return "\n".join(asm)
 
     def ir(self) -> str:
         '''Returns lifed intermediate representation of instructions from the lowest addressed basic block to the end of the largest addressed basic block'''
         bbs = [bb for bb in self.basic_blocks]
-        bbs = sorted(bbs, key=lambda b: b.address)
+        bbs = sorted(bbs, key=lambda b: 0 if b.address is None else b.address) 
 
         ir = []
         for bb in bbs:
             ir.append(bb.ir().data)
 
         return "\n".join(ir)
-
-    def set_disassembler(self, disassembler: "Disassembler"):
-        self._backend.disassembler = disassembler
 
     def orm(self):
         names = self.names
@@ -706,7 +680,7 @@ class NativeFunction(NativeCode):
                 session.add(f_orm)
 
             if not self.thunk:
-                sources = list()
+                sources:List[SourceFunction] = list()
                 for src in self.sources:
                     for src_other in sources:
                         if src.sha256 == src_other.sha256:
@@ -765,7 +739,8 @@ class NativeFunction(NativeCode):
 
             for instr in block_orm.instructions:
                 if instr is not None:
-                    [session.add(ir) for ir in instr.ir]
+                    for ir in instr.ir:
+                        session.add(ir)
                 session.add(instr)
             session.add(block_orm)
 
@@ -780,7 +755,6 @@ class SourceFunction(BaseModel):
     Representation of the source code of a function.
     Currently tailored around C functions
     '''
-    _backend: Backend = Backend()
     _tree_sitter_root = None
 
     lang: str = "C"
@@ -792,7 +766,7 @@ class SourceFunction(BaseModel):
     source: str
     argv: Optional[List[Argument]] = list()
     return_type: Optional[str] = ""
-    qualifiers: Set[str] = list()
+    qualifiers: Set[str] = set()
     '''Function Qualifiers such as `const`, `volatile`, or `static`'''
 
     @classmethod
@@ -872,15 +846,11 @@ class SourceFunction(BaseModel):
     def __hash__(self):
         return int(self.sha256, 16)
 
-    @computed_field(repr=False)
-    @cached_property
+    @computed_field(repr=False) # type: ignore[misc]
+    @cached_property 
     def sha256(self) -> str:
         '''sha256 hex digest of the file'''
         return hashlib.sha256(bytes(self.source, 'utf8')).hexdigest()
-
-    def set_disassembler(self, disassembler: "Disassembler"):
-        self._backend.disassembler = disassembler
-
 
 class Binary(NativeCode):
     '''
@@ -890,15 +860,13 @@ class Binary(NativeCode):
     class NoDataException(Exception):
         pass
 
-    _backend: Backend = Backend()
-
     # Path to where the binary is stored
-    _path: Path = None
+    _path: Optional[Path] = None
     # Whether or not the binary at self._path is gz compressed
     _compressed: bool = False
     # The file contents of the binary
-    _bytes: bytes = None
-    _size: int = None
+    _bytes: Optional[bytes] = None
+    _size: Optional[int] = None
     _function_lookup: Dict[int, NativeFunction] = dict()
 
     functions: Set[NativeFunction] = set()
@@ -936,7 +904,7 @@ class Binary(NativeCode):
     @classmethod
     def from_path(cls, path: Union[Path, str], **kwargs):
         obj = cls(**kwargs)
-        obj._path = path
+        obj._path = Path(path)
         return obj
 
     @classmethod
@@ -1047,13 +1015,10 @@ class Binary(NativeCode):
             path = Path(path)
         self._path = path
 
-    def set_disassembler(self, disassembler: "Disassembler"):
-        self._backend.disassembler = disassembler
-
     @cached_property
     def call_graph(self) -> nx.MultiDiGraph:
         '''Function Call Graph'''
-        g = nx.MultiDiGraph()
+        g:nx.MultiDiGraph = nx.MultiDiGraph()
         for f in self.functions:
             g.add_node(f)
             for child_f in f.calls:
@@ -1064,7 +1029,7 @@ class Binary(NativeCode):
                 g.add_edge(f, parent_f)
         return g
 
-    @computed_field(repr=False)
+    @computed_field(repr=False) # type: ignore[misc]
     @cached_property
     def sha256(self) -> str:
         '''sha256 hex digest of the file'''

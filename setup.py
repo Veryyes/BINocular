@@ -24,8 +24,8 @@ setup(
         'IPython',
         'sphinx'
     ],
-    extra_require = {
-        'dev': ['pytest', 'sphinx', 'sphinx_rtd_theme', 'sphinx_mdinclude', 'build']
+    extras_require = {
+        'dev': ['pytest', 'sphinx', 'sphinx_rtd_theme', 'sphinx_mdinclude', 'build', 'types-networkx']
     },
     entry_points={
         "console_scripts": ['binocular = binocular.run:main']

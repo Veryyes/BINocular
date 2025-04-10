@@ -9,7 +9,6 @@ from .primitives import (
     Argument,
     Branch,
     IR,
-    Backend,
     Instruction,
     BasicBlock,
     NativeFunction,
@@ -27,7 +26,7 @@ from .consts import (
 
 from .ghidra import Ghidra
 from .rizin import Rizin
-from .disassembler import Disassembler
+from .disassembler import Disassembler, Backend
 
 __all__ = [
     "Argument",

@@ -8,11 +8,39 @@ from collections.abc import Iterable
 from typing import Any, Optional, Tuple, List, Dict, Set, IO
 
 
+from sqlalchemy.engine.base import Engine
+from sqlalchemy import create_engine
+
 from .primitives import (BasicBlock, Binary, NativeFunction, SourceFunction,
                          Instruction, Argument, Branch, IR, Reference, Variable)
-
+from .db import Base
 from .consts import Endian
 from . import logger
+
+class Backend:
+    '''
+    Wrapper for a sqlachemy.Engine
+    '''
+
+    engine: Optional[Engine] = None
+
+    @classmethod
+    def set_engine(cls, db_uri: str) -> Engine:
+        if Backend.engine is None:
+            Backend.engine = create_engine(db_uri)
+            Base.metadata.create_all(Backend.engine)
+
+        return Backend.engine
+
+    def __init__(self, disassembler: Optional[Disassembler] = None):
+        self.disassembler:Optional[Disassembler] = disassembler
+
+    @property
+    def db(self) -> Engine:
+        if Backend.engine is None:
+            raise RuntimeError("Engine must be set")
+        
+        return Backend.engine
 
 class Disassembler(ABC):
     '''
@@ -27,16 +55,16 @@ class Disassembler(ABC):
         '''Raise when a disassembler receives a binary of an architecture that it does not support'''
         pass
 
-    def __init__(self, verbose=True):
-        self.verbose = verbose
+    def __init__(self, verbose:bool=True):
+        self.verbose:bool = verbose
 
-        self._bb_count = 0
+        self._bb_count:int = 0
         self._func_names: Dict[str, NativeFunction] = dict()
         self._func_addrs: Dict[int, NativeFunction] = dict()
         self._bbs: Dict[int, BasicBlock] = dict()
         self._instrs: Dict[int, Instruction] = dict()
-        self.binary = None
-        self.functions = list()
+        self.binary:Optional[Binary] = None
+        self.functions:List[NativeFunction] = list()
 
     def __enter__(self):
         return self.open()
@@ -88,7 +116,6 @@ class Disassembler(ABC):
             dynamic_libs=self.get_dynamic_libs()
         )
         self.binary.set_path(self._binary_filepath)
-        self.binary.set_disassembler(self)
 
         io_stream = self.binary.io()
         self.binary.strings |= set(
@@ -101,11 +128,8 @@ class Disassembler(ABC):
             f"[{self.name()}] Binary Data Loaded: {time.time() - start:.2f}s")
 
     def _create_functions(self):
-        start = time.time()
-
         count = 0
         for func_ctxt in self.get_func_iterator():
-            start = time.time()
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
             logger.info(f"Processing Function: {func_name}")

@@ -1,17 +1,18 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Tuple, Type, Dict
 from collections import defaultdict
 import subprocess
 import posixpath
 from urllib.parse import urlsplit, unquote
 
-from archinfo import *
+from archinfo import ArchAArch64, ArchAMD64, ArchARM, ArchARMCortexM, ArchARMEL, ArchARMEL, ArchARMHF, ArchAVR8, ArchMIPS32, ArchMIPS64, ArchPPC32, ArchPPC64, ArchRISCV64, ArchS390X, ArchSoot, ArchX86, ArchNotFound
 
-arches = [ArchAArch64, ArchAMD64, ArchARM, ArchARMCortexM, ArchARMEL, ArchARMEL, ArchARMHF,
+arches:List[Type] = [ArchAArch64, ArchAMD64, ArchARM, ArchARMCortexM, ArchARMEL, ArchARMEL, ArchARMHF,
           ArchAVR8, ArchMIPS32, ArchMIPS64, ArchPPC32, ArchPPC64, ArchRISCV64, ArchS390X, ArchSoot, ArchX86]
-archinfo_lookup = defaultdict(lambda: ArchNotFound)
+archinfo_lookup:Dict[str, Type] = defaultdict(lambda: ArchNotFound)
+
 for a in arches:
     archinfo_lookup[a.name] = a
     archinfo_lookup[a.name.upper()] = a
