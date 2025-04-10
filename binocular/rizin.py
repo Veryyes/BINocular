@@ -16,7 +16,7 @@ import tarfile
 from urllib.request import urlopen
 
 from .disassembler import Disassembler
-from .primitives import Section, Instruction, IR, Branch, Argument, Reference, RefType, Variable
+from .primitives import Instruction, IR, Branch, Argument, Reference, RefType, Variable
 from .consts import Endian, BranchType, IL
 from .utils import run_proc
 from . import logger
@@ -170,13 +170,6 @@ class Rizin(Disassembler):
         self._thunk_dict = dict()
         self._caller_cache = defaultdict(lambda: set())
         self._calls_cache = defaultdict(lambda: set())
-
-    def get_sections(self) -> Iterable[Section]:
-        '''
-        Returns a list of the sections within the binary.
-        Currently only supports sections within an ELF file.
-        '''
-        return list()
 
     def analyze(self, path) -> bool:
         '''

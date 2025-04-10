@@ -14,7 +14,6 @@ import re
 import subprocess
 import struct
 import threading
-import queue
 import time
 from enum import Enum
 import socket
@@ -24,7 +23,7 @@ from git import Repo
 import git
 
 from .disassembler import Disassembler
-from .primitives import Section, Instruction, IR, Argument, Branch, Reference, Variable
+from .primitives import Instruction, IR, Argument, Branch, Reference, Variable
 from .consts import Endian, IL, BranchType, RefType
 from .utils import run_proc
 from . import logger
@@ -83,6 +82,7 @@ class PipeRPC:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.is_connected = False
         self.timeout = timeout
+        self.proc = None
 
     def connect(self):
         assert self.proc.poll() == None
@@ -148,45 +148,38 @@ class PipeRPC:
                 raise TimeoutError
 
         return data
+
 # TODO monitor for ERROR REPORT SCRIPT ERROR
 class StdoutMonitor(threading.Thread):
-    def __init__(self, verbose:bool=False):
+    def __init__(self, chunk_len:int=2048, verbose:bool=False):
         super().__init__()
         self.proc:subprocess.Popen = None
-        self.verbose = verbose
-        self.output = queue.Queue()
-        self.running = False
+        self.verbose:bool = verbose
+        self.running :bool= False
+        self.data:str = ""
+        self.chunk_len:int = chunk_len
+
+    def __contains__(self, x:str):
+        return x in self.data
 
     def run(self):
         if self.proc is None:
             return
 
         self.running = True
+        while self.running and self.proc.poll() is None:
+            raw = self.proc.stdout.read1(self.chunk_len)
+            if raw is None:
+                time.sleep(1)
+            else:
+                data = str(raw, 'utf8')
+                self.data += data
 
-        lines = iter(self.proc.stdout.readline, b"")
+            time.sleep(.250)
 
-        while self.proc.poll() is None:
-            if not self.running:
-                return
-
-            try:
-                line = str(next(lines), 'utf8').strip()
-
-                if self.verbose:
-                    logger.info(line)
-
-                self.output.put(line)
-            except StopIteration:
-                time.sleep(.10)
-
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
 
-    def readline(self):
-        return self.output.get()
-
-    def lines_left(self):
-        return self.output.qsize()
 
 class Ghidra(Disassembler):
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
@@ -379,12 +372,12 @@ class Ghidra(Disassembler):
     def __init__(self, verbose=True, project_path: str = None, ghidra_url:str=None, home:str=None, save_on_close=False, jvm_args: Iterable[str] = None):
         super().__init__(verbose=verbose)
         
-        # TODO they arent used
+        # TODO Use these JVM args
         self.jvm_args = jvm_args
         if self.jvm_args is None:
             self.jvm_args = list()
 
-        # TODO assert check
+        # TODO Make it work with ghidra server
         # TODO unconfirmed this will work with a ghidra server
         self.ghidra_url = ghidra_url
 
@@ -408,13 +401,13 @@ class Ghidra(Disassembler):
         else:
             self.ghidra_home = home
 
-        self.ghidra_proc = None
+        self.ghidra_proc:Optional[subprocess.Popen] = None
         self.rpc_pipe = None
         self.stdout_monitor = None
 
         self.save_on_close = save_on_close
 
-    def _analyze_headless_path(self):
+    def _analyze_headless_path(self) -> str:
         return os.path.join(
             self.ghidra_home,
             "support",
@@ -424,51 +417,43 @@ class Ghidra(Disassembler):
     def open(self):
         return self
 
+    # TODO type hint
     def close(self):
         self.clear()
 
     def clear(self):
         super().clear()
+        if self.ghidra_proc is None:
+            return
 
-        if self.ghidra_proc is not None:
-            try:
-                pipe_dead = False
+        if self.stdout_monitor is None:
+            return
 
-                if self.stdout_monitor:
-                    while self.stdout_monitor.lines_left() > 0:
-                        pipe_dead = "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor.readline()
-                        break
-                    
-                    self.stdout_monitor.stop()
+        if "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor:
+            logger.info("Ghidra Analyze Headless Errored")
 
-                if not pipe_dead:
-                    logger.info("Closing RPC Pipe...")
-                    try:
-                        self.rpc_pipe.request(PipeRPC.Command.QUIT)
-                    except TimeoutError:
-                        logger.warn("Encountered Timeout on PipeRPC graceful quit")
-                    self.rpc_pipe.close()
+        self.stdout_monitor.stop()
+        self.stdout_monitor.join()
 
-                logger.info("Waiting on Ghidra to exit...")
-                out, err = self.ghidra_proc.communicate(timeout=5)
-                if self.verbose:
-                    if len(out) > 0:
-                        logger.info(str(out, 'utf8'))
-                    if len(err) > 0:
-                        logger.warning(str(err, 'utf8'))
-                
-            except subprocess.TimeoutExpired:
-                self.ghidra_proc.kill()
-                logger.warning("Killed Ghidra Process. Took Too long")
+        logger.info("Closing RPC Pipe...")
+        try:
+            self.rpc_pipe.request(PipeRPC.Command.QUIT)
+        except TimeoutError:
+            logger.warn("Encountered Timeout on PipeRPC graceful quit")
+        
+        self.rpc_pipe.close()
+        logger.info("Waiting on Ghidra to exit...")
+        try:
+            self.ghidra_proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._kill_headless()
 
         exit_code = self.ghidra_proc.poll()
         if exit_code is not None:
-            self.ghidra_proc.kill()
-
-        if self.stdout_monitor:
-            self.stdout_monitor.join()
-            self.stdout_monitor = None
-        logger.info(f"Ghidra Process has exited: {exit_code}")
+            logger.info(f"Ghidra Process has exited: {exit_code}")
+            self.ghidra_proc = None
+        else:
+            raise RuntimeError("Unable to Close Ghidra Analyze Headless")
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s + 
@@ -481,6 +466,8 @@ class Ghidra(Disassembler):
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: True on success, false otherwise
         '''
+
+        # CHECK IN
         bin_size = 0
         m = hashlib.md5()
         with open(path, 'rb') as f:
@@ -492,6 +479,9 @@ class Ghidra(Disassembler):
             
         md5hash = m.hexdigest()
 
+        imported = False
+
+        # PROJECT SETUP
         cmd = [self._analyze_headless_path()]
         if self.ghidra_url is not None:
             cmd.append(self.ghidra_url)
@@ -501,63 +491,64 @@ class Ghidra(Disassembler):
             # delete a whole project if need be
             self.project_location = os.path.join(self.base_project_path, md5hash)
             self.project_name = md5hash
+            imported = os.path.exists(self.project_location)
             os.makedirs(self.project_location, exist_ok=True)
             cmd += [self.project_location, self.project_name]
 
         self.rpc_pipe = PipeRPC(timeout = self.analysis_timeout(bin_size))
 
-        # Import a new File into Ghidra
-        # if we already imported it, this will fail and nothing bad happens
-        # except that we wasted time.
-        if len(os.listdir(self.project_location)) == 0:
-            import_cmd = cmd + ["-import", path]
-            self.ghidra_proc = subprocess.Popen(
-                import_cmd,
-                stdout = subprocess.PIPE,
-                stderr = subprocess.PIPE
-            )
-            self.ghidra_proc.communicate()
-
         # Run the BinocularPipe Script
         cmd += [
-            "-process", os.path.basename(path),
             "-scriptPath", Ghidra.SCRIPT_PATH(),
             "-postScript", "BinocularPipe.java", self.rpc_pipe.gscript_ip, str(self.rpc_pipe.port)
         ]
-        
+        if not imported:
+            cmd += ["-import", str(path)]
+        else:
+            cmd += ['-process', os.path.basename(path)]
+
         if self.verbose:
             logger.info("$ " + " ".join(cmd))
+
 
         self.ghidra_proc = subprocess.Popen(
             cmd,
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE
         )
+
         self.rpc_pipe.proc = self.ghidra_proc
-        self.stdout_monitor = StdoutMonitor(self.verbose)
+
+        self.stdout_monitor = StdoutMonitor(verbose=self.verbose)
         self.stdout_monitor.proc = self.ghidra_proc
         self.stdout_monitor.start()
         
         start = time.time()
         timedout = False
         while (timedout := (time.time() - start < self.analysis_timeout(bin_size)) and self.ghidra_proc.poll() is None):
-            if self.stdout_monitor.lines_left() > 0:
-                line = self.stdout_monitor.readline()
-                if "Analysis succeeded for file" in line:
-                    return True, None
+            if "Analysis succeeded for file" in self.stdout_monitor:
+                return True, None
 
             time.sleep(.01)
 
-        if timedout:
-            return False, "Analyze Headless Timedout"
+        # Timed out. Kill self.ghidra_proc
+        self.stdout_monitor.stop()
+        self.stdout_monitor.join()
+        self._kill_headless()
+        return False, "Analyze Headless Timedout"
 
-        # if process is exited
-        exit_code = self.ghidra_proc.poll()
-        if exit_code is not None:
-            stdout, stderr = self.ghidra_proc.communicate()
-            return False, str(stdout, 'utf8') + str(stderr, 'utf8') 
 
-        return False, "Analyze Headless in Weird State"
+    def _kill_headless(self):
+        if self.ghidra_proc is None:
+            return True
+
+        self.ghidra_proc.terminate()
+        count = 0
+        if count < 5 and self.ghidra_proc.poll() is None:
+            time.sleep(1)
+            count += 1
+
+        return self.ghidra_proc.poll() is not None
 
     @staticmethod
     def _unpack_str_list(raw:bytes) -> List[str]:
@@ -612,36 +603,6 @@ class Ghidra(Disassembler):
         '''Returns the list of names of the dynamic libraries used in this binary'''
         raw = self.rpc_pipe.request(PipeRPC.Command.DYN_LIBS)
         return [str(lib, 'utf8') for lib in raw.split(b"\x00")]
-
-    def get_sections(self) -> Iterable[Section]:
-        '''
-        Returns a list of the sections within the binary.
-        Currently only supports sections within an ELF file.
-        '''
-        raw = self.rpc_pipe.request(PipeRPC.Command.SECTIONS)
-        i = 0
-        while i < len(raw):
-            name_len = raw[i]
-            name = raw[i+1: i+1+name_len]
-            i += 1 + name_len
-
-            type_len = raw[i]
-            type_ = raw[i+1: i+1+type_len]
-            i += 1 + type_len
-
-            start, size, rwx = struct.unpack("!QQB", raw[i:i+17])
-
-            yield Section(
-                name = str(name, 'utf8'),
-                type = str(type_, "utf8"),
-                start = start,
-                offset = 0,
-                size = size,
-                alloc = rwx & 4 != 0,
-                write = rwx & 2 != 0,
-                execute = rwx & 1 != 0
-            )
-            i += 17
 
     def get_func_iterator(self) -> Iterable[int]:
         '''

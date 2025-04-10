@@ -6,7 +6,6 @@ from .consts import Endian, IL, RefType, BranchType
 
 from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, BigInteger
 from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship
-from checksec.elf import PIEType, RelroType
 
 MAX_STR_SIZE = 512
 
@@ -96,18 +95,6 @@ class BinaryORM(Base):
     compilation_flags: Mapped[Optional[str]]
 
     sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    nx: Mapped[bool]
-    pie: Mapped[PIEType]
-    canary: Mapped[bool]
-    relro: Mapped[RelroType]
-    rpath: Mapped[bool]
-    runpath: Mapped[bool]
-    stripped: Mapped[bool]
-    fortify: Mapped[bool]
-    fortified: Mapped[int]
-    fortifiable: Mapped[int]
-    fortify_score: Mapped[int]
-
     tags: Mapped[str]
 
     functions: Mapped[List[NativeFunctionORM]
@@ -138,8 +125,6 @@ class NativeFunctionORM(Base):
     endianness: Mapped[Endian]
     architecture: Mapped[str]
     bitness: Mapped[int]
-    pie: Mapped[PIEType]
-    canary: Mapped[bool]
     return_type: Mapped[str]
     argv: Mapped[str]
     thunk: Mapped[bool]
@@ -220,7 +205,6 @@ class BasicBlockORM(Base):
     endianness: Mapped[Endian]
     architecture: Mapped[str]
     bitness: Mapped[int]
-    pie: Mapped[PIEType]
     size: Mapped[int]
     function_id: Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
     function: Mapped[NativeFunctionORM] = relationship(

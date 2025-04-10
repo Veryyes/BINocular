@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import logging
 import time
 import string
 from abc import ABC, abstractmethod
@@ -10,7 +9,7 @@ from typing import Any, Optional, Tuple, List, Dict, Set, IO
 
 
 from .primitives import (BasicBlock, Binary, NativeFunction, SourceFunction,
-                         Instruction, Section, Argument, Branch, IR, Reference, Variable)
+                         Instruction, Argument, Branch, IR, Reference, Variable)
 
 from .consts import Endian
 from . import logger
@@ -78,9 +77,7 @@ class Disassembler(ABC):
     def _create_binary(self):
         start = time.time()
 
-        sections = self.get_sections()
         self.binary = Binary(
-            sections=sections,
             filename=os.path.basename(self._binary_filepath),
             names=[self.get_binary_name()],
             entrypoint=self.get_entry_point(),
@@ -111,13 +108,11 @@ class Disassembler(ABC):
             start = time.time()
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
-            logger.info(f"Processing: {func_name}")
+            logger.info(f"Processing Function: {func_name}")
             f = NativeFunction(
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
                 bitness=self.binary.bitness,
-                pie=self.binary.pie,
-                canary=self.binary.canary,
                 address=addr,
                 names=[func_name],
                 return_type=self.get_func_return_type(addr, func_ctxt),
@@ -168,7 +163,7 @@ class Disassembler(ABC):
                 logger.warn(
                     f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
 
-            logger.info(f"Analysis Pass 1 - {func_name}: {time.time()-start:.2f}s")
+            # logger.info(f"Analysis Pass 1 - {func_name}: {time.time()-start:.2f}s")
 
         # 2nd pass to do callee/callers
         for func_ctxt in self.get_func_iterator():
@@ -184,13 +179,13 @@ class Disassembler(ABC):
             for callee_addr in self.get_func_callees(addr, func_ctxt):
                 f.calls_addrs.add(callee_addr)
 
-        run_time = time.time() - start
-        logger.info(f"[{self.name()}] {self._bb_count} Basic Blocks Loaded")
+        # run_time = time.time() - start
+        # logger.info(f"[{self.name()}] {self._bb_count} Basic Blocks Loaded")
 
-        logger.info(f"[{self.name()}] {count} Functions Loaded")
-        logger.info(f"[{self.name()}] Function Data Loaded: {run_time:.2f}s")
-        logger.info(
-            f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
+        # logger.info(f"[{self.name()}] {count} Functions Loaded")
+        # logger.info(f"[{self.name()}] Function Data Loaded: {run_time:.2f}s")
+        # logger.info(
+        #     f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
     def _create_basicblocks(self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]):
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
@@ -201,7 +196,6 @@ class Disassembler(ABC):
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
                 bitness=self.binary.bitness,
-                pie=self.binary.pie,
                 address=bb_addr
             )
 
@@ -334,12 +328,6 @@ class Disassembler(ABC):
 
         return strings
 
-    def get_sections(self) -> Iterable[Section]:
-        '''
-        Returns a list of the sections within the binary.
-        Currently only supports sections within an ELF file.
-        '''
-        return list()
 
     def get_binary_name(self) -> str:
         '''Returns the name of the binary loaded'''

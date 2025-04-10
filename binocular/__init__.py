@@ -14,7 +14,6 @@ from .primitives import (
     BasicBlock,
     NativeFunction,
     SourceFunction,
-    Section,
     Binary,
     Variable
 )
@@ -39,7 +38,6 @@ __all__ = [
     "BasicBlock",
     "NativeFunction",
     "SourceFunction",
-    "Section",
     "Binary",
     "Ghidra",
     "Rizin",
