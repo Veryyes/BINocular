@@ -212,6 +212,9 @@ class Disassembler(ABC):
         #     f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
     def _create_basicblocks(self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]):
+        if self.binary is None:
+            raise RuntimeError("self.binary is not set!")
+
         for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
             bb_addr = self.get_bb_addr(bb_ctxt, func_ctxt)
 
@@ -234,6 +237,9 @@ class Disassembler(ABC):
             xrefs -= bb.xrefs
 
             f.basic_blocks.add(bb)
+
+            if bb.address is None:
+                raise RuntimeError("No address associated with basic block")
             f._block_lookup[bb.address] = bb
             bb.set_function(f)
 
@@ -244,6 +250,9 @@ class Disassembler(ABC):
                 f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
 
     def _create_instructions(self, bb_addr: int, bb_ctxt: Any, bb: BasicBlock, func_ctxt: Any):
+        if self.binary is None:
+            raise RuntimeError("self.binary is not set!")
+
         cur_addr = bb_addr
         for data, asm in self.get_bb_instructions(bb_addr, bb_ctxt, func_ctxt):
             instr = Instruction(
@@ -262,19 +271,19 @@ class Disassembler(ABC):
 
             cur_addr += len(data)
 
-    def function_at(self, address: int) -> NativeFunction:
+    def function_at(self, address: int) -> Optional[NativeFunction]:
         '''Returns a Function at the address specified'''
         return self._func_addrs.get(address, None)
 
-    def function_sym(self, symbol: str) -> NativeFunction:
+    def function_sym(self, symbol: str) -> Optional[NativeFunction]:
         '''Returns a Function with the given symbol names'''
         return self._func_names.get(symbol, None)
 
-    def basic_block(self, address: int) -> BasicBlock:
+    def basic_block(self, address: int) -> Optional[BasicBlock]:
         '''Returns a basic block at the given address'''
         return self._bbs.get(address, None)
 
-    def instruction(self, address: int) -> Instruction:
+    def instruction(self, address: int) -> Optional[Instruction]:
         '''Returns the instruction at the given address'''
         return self._instrs.get(address, None)
 
@@ -322,7 +331,7 @@ class Disassembler(ABC):
         self.binary = None
         self.functions.clear()
 
-    def get_strings(self, binary_io: IO) -> Iterable[str]:
+    def get_strings(self, binary_io: IO) -> Iterable[bytes]:
         '''
         Returns the list of defined strings in the binary
         :param binary_io: a file-like object to the binary ingested
@@ -387,7 +396,7 @@ class Disassembler(ABC):
 
     @classmethod
     @abstractmethod
-    def install(cls, version: str = None, install_dir:str=None, build:bool=False, local_install_file:str=None) -> str:
+    def install(cls, version: Optional[str] = None, install_dir:Optional[str]=None, build:Optional[bool]=False, local_install_file:Optional[str]=None) -> str:
         '''
         Installs the disassembler to a user specified directory or within the python module if none is specified
         :param version: The release version or commit hash. If commit hash is provided build must be set True. Ignored if local_install_file is provided
@@ -521,7 +530,7 @@ class Disassembler(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple(bytes, str)]:
+    def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple[bytes, str]]:
         '''
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         '''

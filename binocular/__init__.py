@@ -1,4 +1,4 @@
-import coloredlogs
+import coloredlogs # type: ignore[import-untyped]
 import logging
 logger = logging.getLogger("BINocular")
 logger.addHandler(logging.FileHandler("logs.txt"))
