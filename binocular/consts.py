@@ -2,14 +2,16 @@ from enum import Enum
 
 
 class Endian(Enum):
-    '''Enumeration of Endianness'''
+    """Enumeration of Endianness"""
+
     LITTLE = 0
     BIG = 1
     OTHER = 2
 
 
 class BranchType(Enum):
-    '''Enumeration of different types of Code Branching'''
+    """Enumeration of different types of Code Branching"""
+
     TrueBranch = 0
     FalseBranch = 1
     UnconditionalBranch = 2
@@ -17,36 +19,38 @@ class BranchType(Enum):
 
 
 class IL(Enum):
-    '''Enumeration of supported Intermediate Languages'''
+    """Enumeration of supported Intermediate Languages"""
+
     VEX = 0
     ESIL = 1
     PCODE = 2
 
 
 class RefType(Enum):
-    '''Enumeration of different types of references'''
+    """Enumeration of different types of references"""
 
     UNKNOWN = 0
-    '''Unknown type of Reference'''
+    """Unknown type of Reference"""
 
     JUMP = 1
-    '''Reference to a normal Branch'''
+    """Reference to a normal Branch"""
 
     CALL = 2
-    '''Reference to a Function Call'''
+    """Reference to a Function Call"""
 
     READ = 3
-    '''Reference to a Memory Read'''
+    """Reference to a Memory Read"""
 
     WRITE = 4
-    '''Reference to a Memory Write'''
+    """Reference to a Memory Write"""
 
     DATA = 5
-    '''Reference to either a Memory Read or Write'''
+    """Reference to either a Memory Read or Write"""
 
 
 class IndirectToken:
-    '''A Token to represent a Dynamically Determined Value'''
+    """A Token to represent a Dynamically Determined Value"""
+
     pass
 
 

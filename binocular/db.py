@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import List, Optional
 
-from .consts import Endian, IL, RefType, BranchType
+from sqlalchemy import BigInteger, Column, ForeignKey, Integer, String, Table, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, BigInteger
-from sqlalchemy.orm import DeclarativeBase, Mapped,  mapped_column, relationship
-from checksec.elf import PIEType, RelroType
+from .consts import IL, BranchType, Endian, RefType
 
 MAX_STR_SIZE = 512
 
@@ -26,14 +25,14 @@ bin_name_pivot = Table(
     "bin_name_pivot",
     Base.metadata,
     Column("bin_id", ForeignKey("binaries.id")),
-    Column("name_id", ForeignKey("names.id"))
+    Column("name_id", ForeignKey("names.id")),
 )
 
 func_name_pivot = Table(
     "func_name_pivot",
     Base.metadata,
     Column("native_func_id", ForeignKey("native_functions.id")),
-    Column("name_id", ForeignKey("names.id"))
+    Column("name_id", ForeignKey("names.id")),
 )
 
 source_compile_pivot = Table(
@@ -47,7 +46,7 @@ calls_pivot = Table(
     "calls_func_pivot",
     Base.metadata,
     Column("native_func_caller", ForeignKey("native_functions.id")),
-    Column("native_func_callee", ForeignKey("native_functions.id"))
+    Column("native_func_callee", ForeignKey("native_functions.id")),
 )
 
 
@@ -78,8 +77,7 @@ class BinaryORM(Base):
     __tablename__ = "binaries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    metainfo_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey('metainfo.id'))
+    metainfo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("metainfo.id"))
     metainfo: Mapped[Optional[MetaInfo]] = relationship(back_populates="bin")
 
     names: Mapped[List[NameORM]] = relationship(secondary=bin_name_pivot)
@@ -96,27 +94,15 @@ class BinaryORM(Base):
     compilation_flags: Mapped[Optional[str]]
 
     sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    nx: Mapped[bool]
-    pie: Mapped[PIEType]
-    canary: Mapped[bool]
-    relro: Mapped[RelroType]
-    rpath: Mapped[bool]
-    runpath: Mapped[bool]
-    stripped: Mapped[bool]
-    fortify: Mapped[bool]
-    fortified: Mapped[int]
-    fortifiable: Mapped[int]
-    fortify_score: Mapped[int]
-
     tags: Mapped[str]
 
-    functions: Mapped[List[NativeFunctionORM]
-                      ] = relationship(back_populates='binary')
+    functions: Mapped[List[NativeFunctionORM]] = relationship(back_populates="binary")
 
     @classmethod
     def select_hash(cls, session, hash: str):
-        row = session.execute(select(BinaryORM).where(
-            BinaryORM.sha256 == hash)).one_or_none()
+        row = session.execute(
+            select(BinaryORM).where(BinaryORM.sha256 == hash)
+        ).one_or_none()
         return row
 
 
@@ -127,25 +113,22 @@ class NativeFunctionORM(Base):
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     names: Mapped[List[NameORM]] = relationship(secondary=func_name_pivot)
     address: Mapped[int] = mapped_column(BigInteger())
-    binary_id: Mapped[int] = mapped_column(ForeignKey('binaries.id'))
-    binary: Mapped[BinaryORM] = relationship(back_populates='functions')
+    binary_id: Mapped[int] = mapped_column(ForeignKey("binaries.id"))
+    binary: Mapped[BinaryORM] = relationship(back_populates="functions")
 
-    basic_blocks: Mapped[List[BasicBlockORM]
-                         ] = relationship(back_populates='function')
-    variables: Mapped[List[VariableORM]] = relationship(
-        back_populates='function')
+    basic_blocks: Mapped[List[BasicBlockORM]] = relationship(back_populates="function")
+    variables: Mapped[List[VariableORM]] = relationship(back_populates="function")
     stack_frame_size: Mapped[int] = mapped_column(Integer, default=0)
     endianness: Mapped[Endian]
     architecture: Mapped[str]
     bitness: Mapped[int]
-    pie: Mapped[PIEType]
-    canary: Mapped[bool]
     return_type: Mapped[str]
     argv: Mapped[str]
     thunk: Mapped[bool]
 
     sources: Mapped[List[SourceFunctionORM]] = relationship(
-        secondary=source_compile_pivot, back_populates='compiled')
+        secondary=source_compile_pivot, back_populates="compiled"
+    )
 
     calls = relationship(
         "NativeFunctionORM",
@@ -159,14 +142,18 @@ class NativeFunctionORM(Base):
         secondary=calls_pivot,
         primaryjoin=id == calls_pivot.c.native_func_callee,
         secondaryjoin=id == calls_pivot.c.native_func_caller,
-        back_populates='calls'
+        back_populates="calls",
     )
 
     @classmethod
     def select_hash_by_binary(cls, session, bin_hash: str, func_hash: str):
-        stmt = select(NativeFunctionORM)\
-            .join(NativeFunctionORM.binary)\
-            .where((NativeFunctionORM.sha256 == func_hash) & (BinaryORM.sha256 == bin_hash))
+        stmt = (
+            select(NativeFunctionORM)
+            .join(NativeFunctionORM.binary)
+            .where(
+                (NativeFunctionORM.sha256 == func_hash) & (BinaryORM.sha256 == bin_hash)
+            )
+        )
 
         row = session.execute(stmt).one_or_none()
         if row is not None:
@@ -175,9 +162,13 @@ class NativeFunctionORM(Base):
 
     @classmethod
     def exists_in_binary(cls, session, bin_hash: str, func_hash: str):
-        stmt = select(NativeFunctionORM.id) \
-            .join(NativeFunctionORM.binary) \
-            .where((NativeFunctionORM.sha256 == func_hash) & (BinaryORM.sha256 == bin_hash))
+        stmt = (
+            select(NativeFunctionORM.id)
+            .join(NativeFunctionORM.binary)
+            .where(
+                (NativeFunctionORM.sha256 == func_hash) & (BinaryORM.sha256 == bin_hash)
+            )
+        )
         id_ = session.execute(stmt).one_or_none()
         if id_ is None:
             return False
@@ -185,14 +176,14 @@ class NativeFunctionORM(Base):
 
     @classmethod
     def select_hash(cls, session, hash: str):
-        row = session.execute(select(NativeFunctionORM).where(
-            NativeFunctionORM.sha256 == hash)).one_or_none()
+        row = session.execute(
+            select(NativeFunctionORM).where(NativeFunctionORM.sha256 == hash)
+        ).one_or_none()
         return row
 
     @classmethod
     def exists_hash(cls, session, hash: str):
-        id_ = session.query(NativeFunctionORM.id).filter_by(
-            sha256=hash).scalar()
+        id_ = session.query(NativeFunctionORM.id).filter_by(sha256=hash).scalar()
         if id_ is None:
             return False
         return id_
@@ -207,9 +198,8 @@ class VariableORM(Base):
     is_register: Mapped[bool]
     is_stack: Mapped[bool]
     stack_offset: Mapped[Optional[int]]
-    function_id: Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
-    function: Mapped[NativeFunctionORM] = relationship(
-        back_populates='variables')
+    function_id: Mapped[int] = mapped_column(ForeignKey("native_functions.id"))
+    function: Mapped[NativeFunctionORM] = relationship(back_populates="variables")
 
 
 class BasicBlockORM(Base):
@@ -220,17 +210,14 @@ class BasicBlockORM(Base):
     endianness: Mapped[Endian]
     architecture: Mapped[str]
     bitness: Mapped[int]
-    pie: Mapped[PIEType]
     size: Mapped[int]
-    function_id: Mapped[int] = mapped_column(ForeignKey('native_functions.id'))
-    function: Mapped[NativeFunctionORM] = relationship(
-        back_populates='basic_blocks')
+    function_id: Mapped[int] = mapped_column(ForeignKey("native_functions.id"))
+    function: Mapped[NativeFunctionORM] = relationship(back_populates="basic_blocks")
     instructions: Mapped[List[InstructionORM]] = relationship(
-        back_populates='basic_block')
-    xrefs: Mapped[List[ReferenceORM]] = relationship(
-        back_populates='basic_block')
-    branches: Mapped[List[BranchORM]] = relationship(
-        back_populates='basic_block')
+        back_populates="basic_block"
+    )
+    xrefs: Mapped[List[ReferenceORM]] = relationship(back_populates="basic_block")
+    branches: Mapped[List[BranchORM]] = relationship(back_populates="basic_block")
 
 
 class BranchORM(Base):
@@ -239,7 +226,7 @@ class BranchORM(Base):
     type: Mapped[BranchType]
     target: Mapped[int]
     basic_block_id: Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
-    basic_block: Mapped[BasicBlockORM] = relationship(back_populates='branches')
+    basic_block: Mapped[BasicBlockORM] = relationship(back_populates="branches")
 
 
 class ReferenceORM(Base):
@@ -250,7 +237,7 @@ class ReferenceORM(Base):
     to_addr: Mapped[int] = mapped_column(BigInteger())
     type: Mapped[RefType]
     basic_block_id: Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
-    basic_block: Mapped[BasicBlockORM] = relationship(back_populates='xrefs')
+    basic_block: Mapped[BasicBlockORM] = relationship(back_populates="xrefs")
 
 
 class InstructionORM(Base):
@@ -261,14 +248,12 @@ class InstructionORM(Base):
     architecture: Mapped[str]
     bitness: Mapped[int]
     basic_block_id: Mapped[int] = mapped_column(ForeignKey("basic_blocks.id"))
-    basic_block: Mapped[BasicBlockORM] = relationship(
-        back_populates='instructions')
+    basic_block: Mapped[BasicBlockORM] = relationship(back_populates="instructions")
     address: Mapped[int]
     bytes: Mapped[bytes]
     asm: Mapped[str]
     comment: Mapped[Optional[str]]
-    ir: Mapped[Optional[List[IR_ORM]]] = relationship(
-        back_populates='instruction')
+    ir: Mapped[Optional[List[IR_ORM]]] = relationship(back_populates="instruction")
 
 
 class IR_ORM(Base):
@@ -279,7 +264,7 @@ class IR_ORM(Base):
     data: Mapped[str]
 
     instr_id: Mapped[int] = mapped_column(ForeignKey("instructions.id"))
-    instruction: Mapped[InstructionORM] = relationship(back_populates='ir')
+    instruction: Mapped[InstructionORM] = relationship(back_populates="ir")
 
 
 class SourceFunctionORM(Base):
@@ -292,7 +277,8 @@ class SourceFunctionORM(Base):
     decompiled: Mapped[bool]
     perfect_decomp: Mapped[bool]  # Decompilation matches Source 100%
     compiled: Mapped[List[NativeFunctionORM]] = relationship(
-        secondary=source_compile_pivot, back_populates='sources')
+        secondary=source_compile_pivot, back_populates="sources"
+    )
     source: Mapped[str]
     return_type: Mapped[str]
     argv: Mapped[str]
@@ -300,16 +286,16 @@ class SourceFunctionORM(Base):
 
     @classmethod
     def select_hash(cls, session, hash: str):
-        row = session.execute(select(SourceFunctionORM).where(
-            SourceFunctionORM.sha256 == hash)).one_or_none()
+        row = session.execute(
+            select(SourceFunctionORM).where(SourceFunctionORM.sha256 == hash)
+        ).one_or_none()
         if row is not None:
             return row[0]
         return row
 
     @classmethod
     def exists_hash(cls, session, hash: str):
-        id_ = session.query(SourceFunctionORM.id).filter_by(
-            sha256=hash).scalar()
+        id_ = session.query(SourceFunctionORM.id).filter_by(sha256=hash).scalar()
         if id_ is None:
             return False
         return id_

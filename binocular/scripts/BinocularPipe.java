@@ -650,7 +650,7 @@ public class BinocularPipe extends GhidraScript{
         DecompileResults res = this.decompile(f);
         HighFunction high = res.getHighFunction();
         if (high == null){
-            return null;
+            return "";
         }
 
         return high.getFunctionPrototype().getReturnType().toString();        
@@ -680,7 +680,7 @@ public class BinocularPipe extends GhidraScript{
         DecompileResults res = this.decompile(f);
         DecompiledFunction dFunc = res.getDecompiledFunction();
         if (dFunc == null){
-            return null;
+            return "";
         }
 
         return dFunc.getC();
