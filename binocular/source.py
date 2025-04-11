@@ -1,7 +1,7 @@
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
-import tree_sitter_c
 import tree_sitter
+import tree_sitter_c
 from tree_sitter import Language, Parser
 
 

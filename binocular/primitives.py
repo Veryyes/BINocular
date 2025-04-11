@@ -1,41 +1,42 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union, Set, IO, Optional, Any, Type
-from typing_extensions import Annotated
-from functools import cached_property
-from pathlib import Path
-from collections import defaultdict
+import hashlib
+import logging
 import os
 import tempfile
-import hashlib
+from collections import defaultdict
+from functools import cached_property
+from pathlib import Path
+from typing import IO, Any, Dict, List, Optional, Set, Type, Union
 
 import networkx as nx
+import pyvex
 from pydantic import BaseModel, computed_field, model_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import PlainValidator
-from pydantic.dataclasses import dataclass
-
 from sqlalchemy.orm import Session
-import pyvex
+from typing_extensions import Annotated
 
+from .consts import IL, BranchType, Endian, IndirectToken, RefType
 from .db import (
-    NameORM,
-    StringsORM,
-    BinaryORM,
-    NativeFunctionORM,
-    BasicBlockORM,
-    InstructionORM,
     IR_ORM,
-    SourceFunctionORM,
-    MetaInfo,
-    ReferenceORM,
-    VariableORM,
-    BranchORM,
     MAX_STR_SIZE,
+    BasicBlockORM,
+    BinaryORM,
+    BranchORM,
+    InstructionORM,
+    MetaInfo,
+    NameORM,
+    NativeFunctionORM,
+    ReferenceORM,
+    SourceFunctionORM,
+    StringsORM,
+    VariableORM,
 )
-from .consts import Endian, BranchType, IL, IndirectToken, RefType
-from .utils import str2archinfo
 from .source import C_Code
+from .utils import str2archinfo
+
+logger = logging.getLogger(__file__)
 
 
 parsers: Dict[str, Optional[Type]] = defaultdict(lambda: None)
@@ -90,8 +91,7 @@ class Branch(BaseModel):
         return BranchORM(type=self.type, target=self.target)
 
 
-@dataclass
-class IR:
+class IR(BaseModel):
     """
     Represents a series of intermediate instruction(s) that correspond to a single assembly instruction
     """
@@ -866,7 +866,12 @@ class SourceFunction(BaseModel):
         if f_root is None:
             return None
 
-        src_func_dict = parser.normalize(f_root, encoding=encoding)
+        try:
+            src_func_dict = parser.normalize(f_root, encoding=encoding)
+        except Exception as e:
+            logger.error(f"Tried to parse C Source and Failed: {str(e)}")
+            return None
+
         src_func_dict["decompiled"] = is_decompiled
 
         function_source = cls.model_validate(src_func_dict)

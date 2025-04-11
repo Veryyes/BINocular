@@ -1,32 +1,39 @@
 from __future__ import annotations
-from collections.abc import Iterable
-from collections import OrderedDict
-from typing import Any, Optional, Tuple, List, IO
-import pkgutil
-import os
-import tempfile
-import zipfile
-from urllib.request import urlopen
+
 import hashlib
 import json
-import shutil
+import os
+import pkgutil
 import re
-import subprocess
+import shutil
+import socket
 import struct
+import subprocess
+import tempfile
 import threading
 import time
+import zipfile
+from collections import OrderedDict
+from collections.abc import Iterable
 from enum import Enum
-import socket
+from typing import IO, Any, List, Optional, Tuple
+from urllib.request import urlopen
 
-import requests
-from git import Repo
 import git
+import requests  # type: ignore[import-untyped]
+from git import Repo
 
-from .disassembler import Disassembler
-from .primitives import Instruction, IR, Argument, Branch, Reference, Variable
-from .consts import Endian, IL, BranchType, RefType
-from .utils import run_proc
 from . import logger
+from .consts import IL, BranchType, Endian, RefType
+from .disassembler import Disassembler
+from .primitives import IR, Argument, Branch, Instruction, Reference, Variable
+from .utils import run_proc
+
+
+class PipeRPCNotOpened(Exception):
+    """Exception raise when an object is trying to use PipeRPC when it hasnt been created yet"""
+
+    pass
 
 
 class PipeRPC:
@@ -79,14 +86,18 @@ class PipeRPC:
     def __init__(
         self, gscript_ip: str = "127.0.0.1", port: int = 7331, timeout: int = 30
     ):
-        self.gscript_ip = gscript_ip
-        self.port = port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.is_connected = False
-        self.timeout = timeout
-        self.proc = None
+        self.gscript_ip: str = gscript_ip
+        self.port: int = port
+        self.sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.is_connected: bool = False
+        self.timeout: int = timeout
+        self.proc: Optional[subprocess.Popen] = None
 
-    def connect(self):
+    def connect(self) -> bool:
+        if self.proc is None or self.proc.poll() is not None:
+            self.is_connected = False
+            return False
+
         assert self.proc.poll() == None
         logger.info(f"Attempting to Connect to: {self.gscript_ip}:{self.port}")
         waited = 0.0
@@ -97,7 +108,7 @@ class PipeRPC:
                 logger.info(
                     f"Socket Connect to BINocular Ghidra Script {self.gscript_ip}:{self.port}"
                 )
-                return
+                return True
             except ConnectionRefusedError:
                 time.sleep(0.25)
                 waited += 0.25
@@ -108,6 +119,7 @@ class PipeRPC:
                 )
 
         self.is_connected = False
+        return True
 
     def close(self):
         self.sock.close()
@@ -119,15 +131,20 @@ class PipeRPC:
         bb_addr: int = 0,
         f_addr: int = 0,
         instr_addr: int = 0,
-        timeout: int = 60,
     ) -> bytes:
         if not self.is_connected:
             if cmd == PipeRPC.Command.QUIT:
-                return
+                return b""
 
             self.connect()
 
-        assert self.proc.poll() == None
+        if self.proc is None:
+            raise RuntimeError(
+                "Ghidra AnalyzeHeadless process was never set to RPC Pipe"
+            )
+
+        if self.proc.poll is not None:
+            raise RuntimeError("Ghidra AnalyzeHeadless process is dead")
 
         id = cmd.value
         msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr, instr_addr)
@@ -148,7 +165,7 @@ class PipeRPC:
 
         if size > 0:
             res = self._recv_bytes(self.sock, size, timeout=self.timeout)
-            logger.info(
+            logger.debug(
                 f"Recieved {PipeRPC.Command(res_id-1).name} Response in {time.time()-start:2f}s"
             )
             return res
@@ -170,7 +187,7 @@ class PipeRPC:
 class StdoutMonitor(threading.Thread):
     def __init__(self, chunk_len: int = 2048, verbose: bool = False):
         super().__init__()
-        self.proc: subprocess.Popen = None
+        self.proc: Optional[subprocess.Popen] = None
         self.verbose: bool = verbose
         self.running: bool = False
         self.data: str = ""
@@ -239,7 +256,10 @@ class Ghidra(Disassembler):
 
     @classmethod
     def _install_prebuilt(
-        cls, version: str, install_dir: str, local_install_file: str = None
+        cls,
+        version: Optional[str],
+        install_dir: str,
+        local_install_file: Optional[str] = None,
     ):
         if local_install_file is None:
             # Ask Github API for Ghidra Release versions and the
@@ -286,7 +306,7 @@ class Ghidra(Disassembler):
         return os.path.join(install_dir, os.listdir(install_dir)[0])
 
     @classmethod
-    def _build(cls, version, install_dir):
+    def _build(cls, version: Optional[str], install_dir: str):
         if version is None:
             raise ValueError("No commit version supplied")
 
@@ -334,7 +354,7 @@ class Ghidra(Disassembler):
 
         for cmd in cmds:
             logger.info(f"$ {' '.join(cmd)}")
-            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
+            out, err = run_proc(cmd=cmd, cwd=install_dir)
             if len(out) > 0:
                 logger.info(f"[STDOUT] {out}")
             if len(err) > 0:
@@ -351,10 +371,10 @@ class Ghidra(Disassembler):
     @classmethod
     def install(
         cls,
-        version: str = None,
-        install_dir=None,
-        build=False,
-        local_install_file: str = None,
+        version: Optional[str] = None,
+        install_dir: Optional[str] = None,
+        build: Optional[bool] = False,
+        local_install_file: Optional[str] = None,
     ) -> str:
         """
         Installs the disassembler to a user specified directory or within the python module if none is specified
@@ -387,7 +407,7 @@ class Ghidra(Disassembler):
         return ghidra_home
 
     @classmethod
-    def is_installed(cls, install_dir=None) -> bool:
+    def is_installed(cls, install_dir: Optional[str] = None) -> bool:
         """Returns Boolean on whether or not the dissassembler is installed"""
         os.makedirs(Ghidra.DEFAULT_INSTALL(), exist_ok=True)
 
@@ -406,19 +426,13 @@ class Ghidra(Disassembler):
 
     def __init__(
         self,
-        verbose=True,
-        project_path: str = None,
-        ghidra_url: str = None,
-        home: str = None,
-        save_on_close=False,
-        jvm_args: Iterable[str] = None,
+        verbose: bool = True,
+        project_path: Optional[str] = None,
+        ghidra_url: Optional[str] = None,
+        home: Optional[str] = None,
+        cpus: int = 1,
     ):
         super().__init__(verbose=verbose)
-
-        # TODO Use these JVM args
-        self.jvm_args = jvm_args
-        if self.jvm_args is None:
-            self.jvm_args = list()
 
         # TODO Make it work with ghidra server
         # TODO unconfirmed this will work with a ghidra server
@@ -428,6 +442,7 @@ class Ghidra(Disassembler):
             project_path = Ghidra.DEFAULT_PROJECT_PATH()
         self.base_project_path = project_path
 
+        self.ghidra_home: str
         if home is None:
             ghidra_release_patttern = re.compile(r"ghidra_(\d+(\.\d+)*)_PUBLIC")
             ghidra_dir = None
@@ -445,11 +460,10 @@ class Ghidra(Disassembler):
         else:
             self.ghidra_home = home
 
+        self.cpus: int = cpus
         self.ghidra_proc: Optional[subprocess.Popen] = None
-        self.rpc_pipe = None
-        self.stdout_monitor = None
-
-        self.save_on_close = save_on_close
+        self.rpc_pipe: Optional[PipeRPC] = None
+        self.stdout_monitor: Optional[StdoutMonitor] = None
 
     def _analyze_headless_path(self) -> str:
         return os.path.join(self.ghidra_home, "support", "analyzeHeadless")
@@ -504,7 +518,7 @@ class Ghidra(Disassembler):
         """
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
-        :returns: True on success, false otherwise
+        :returns: (True, optional message) on success, (False, failure reason) otherwise
         """
 
         # CHECK IN
@@ -545,6 +559,8 @@ class Ghidra(Disassembler):
             "BinocularPipe.java",
             self.rpc_pipe.gscript_ip,
             str(self.rpc_pipe.port),
+            "-max-cpu",
+            str(self.cpus),
         ]
         if not imported:
             cmd += ["-import", str(path)]
@@ -607,10 +623,16 @@ class Ghidra(Disassembler):
 
     def get_binary_name(self) -> str:
         """Returns the name of the binary loaded"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return str(self.rpc_pipe.request(PipeRPC.Command.BINARY_NAME), "utf8")
 
     def get_entry_point(self) -> int:
         """Returns the address of the entry point to the function"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.Command.ENTRY_POINT))[
             0
         ]
@@ -621,10 +643,16 @@ class Ghidra(Disassembler):
         For best compatibility use either archinfo, qemu, or compilation triplet naming conventions.
         https://github.com/angr/archinfo
         """
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return str(self.rpc_pipe.request(PipeRPC.Command.ARCHITECTURE), "utf8")
 
     def get_endianness(self) -> Endian:
         """Returns an Enum representing the Endianness"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         endian = str(self.rpc_pipe.request(PipeRPC.Command.ENDIANNESS), "utf8").lower()
         if endian == "little":
             return Endian.LITTLE
@@ -634,18 +662,30 @@ class Ghidra(Disassembler):
 
     def get_bitness(self) -> int:
         """Returns the word size of the architecture (e.g., 16, 32, 64)"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return struct.unpack("!I", self.rpc_pipe.request(PipeRPC.Command.BITNESS))[0]
 
     def get_base_address(self) -> int:
         """Returns the base address the binary is based at"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.Command.BASE_ADDR))[0]
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         """Returns the list of defined strings in the binary"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return self._unpack_str_list(self.rpc_pipe.request(PipeRPC.Command.STRINGS))
 
     def get_dynamic_libs(self) -> Iterable[str]:
         """Returns the list of names of the dynamic libraries used in this binary"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.DYN_LIBS)
         return [str(lib, "utf8") for lib in raw.split(b"\x00")]
 
@@ -656,6 +696,9 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         """
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         # RPC returns back the address of each function
         # We will use the address to index/address/key each function
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNCS)
@@ -673,31 +716,46 @@ class Ghidra(Disassembler):
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         """Returns the name of the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return str(
             self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), "utf8"
         )
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         """Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         args_str = self._unpack_str_list(
             self.rpc_pipe.request(PipeRPC.Command.FUNC_ARGS, f_addr=addr)
         )
         return [Argument.from_literal(s) for s in args_str]
 
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
+    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
         """Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return str(
             self.rpc_pipe.request(PipeRPC.Command.FUNC_RETURN, f_addr=addr), "utf8"
         )
 
     def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         """Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return struct.unpack(
             "!I", self.rpc_pipe.request(PipeRPC.Command.FUNC_STACK_FRAME, f_addr=addr)
         )[0]
 
     def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_VARS, f_addr=addr)
         curr = 0
         while curr < len(raw):
@@ -719,27 +777,42 @@ class Ghidra(Disassembler):
 
     def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
         """Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return bool(
             self.rpc_pipe.request(PipeRPC.Command.FUNC_IS_THUNK, f_addr=addr)[0]
         )
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return str(self.rpc_pipe.request(PipeRPC.Command.DECOMP, f_addr=addr), "utf8")
 
     def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_CALLERS, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
     def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_CALLEES, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
     def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_XREFS, f_addr=addr)
         struct_size = 17
         num_refs = len(raw) // struct_size
@@ -756,6 +829,9 @@ class Ghidra(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         """
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.FUNC_BB, f_addr=addr)
         num_funcs = len(raw) // 8
         fmt = f"!{num_funcs}Q"
@@ -773,6 +849,9 @@ class Ghidra(Disassembler):
         """
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.BB_BRANCHES, bb_addr=bb_addr)
         struct_size = 9
         n = len(raw) // struct_size
@@ -784,12 +863,16 @@ class Ghidra(Disassembler):
 
     def get_bb_instructions(
         self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any
-    ) -> List[Tuple(bytes, str)]:
+    ) -> List[Tuple[bytes, str]]:
         """
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         raw = self.rpc_pipe.request(PipeRPC.Command.BB_INSTR, bb_addr=bb_addr)
 
+        instr: List[Tuple[bytes, str]] = list()
         i = 0
         while i < len(raw):
             instr_size = raw[i]
@@ -805,8 +888,10 @@ class Ghidra(Disassembler):
             i += 1
             mnemonic = raw[i : i + mnemonic_size]
 
-            yield (instr_bytes, str(mnemonic, "utf8"))
+            instr.append((instr_bytes, str(mnemonic, "utf8")))
             i += mnemonic_size
+
+        return instr
 
     def get_ir_from_instruction(
         self, instr_addr: int, instr: Instruction
@@ -814,6 +899,9 @@ class Ghidra(Disassembler):
         """
         Returns the Intermediate Representation data based on the instruction given
         """
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         pcode = str(
             self.rpc_pipe.request(PipeRPC.Command.INSTR_PCODE, instr_addr=instr_addr),
             "utf8",
@@ -822,6 +910,9 @@ class Ghidra(Disassembler):
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         """Return comments at the instruction"""
+        if self.rpc_pipe is None:
+            raise PipeRPCNotOpened
+
         return str(
             self.rpc_pipe.request(PipeRPC.Command.INSTR_COMMENT, instr_addr=instr_addr),
             "utf8",

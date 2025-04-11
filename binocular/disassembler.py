@@ -1,31 +1,30 @@
 from __future__ import annotations
 
 import os
-import time
 import string
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any, Optional, Tuple, List, Dict, Set, IO
+from typing import IO, Any, Dict, List, Optional, Set, Tuple
 
-
-from sqlalchemy.engine.base import Engine
 from sqlalchemy import create_engine
+from sqlalchemy.engine.base import Engine
 
+from . import logger
+from .consts import Endian
+from .db import Base
 from .primitives import (
+    IR,
+    Argument,
     BasicBlock,
     Binary,
-    NativeFunction,
-    SourceFunction,
-    Instruction,
-    Argument,
     Branch,
-    IR,
+    Instruction,
+    NativeFunction,
     Reference,
+    SourceFunction,
     Variable,
 )
-from .db import Base
-from .consts import Endian
-from . import logger
 
 
 class Backend:
@@ -66,6 +65,11 @@ class Disassembler(ABC):
 
     class ArchitectureNotSupported(Exception):
         """Raise when a disassembler receives a binary of an architecture that it does not support"""
+
+        pass
+
+    class AnalyzeNotRun(Exception):
+        """Raised when Diassembler.analyze() needs to be called first in order for the function to work properly"""
 
         pass
 
@@ -345,7 +349,7 @@ class Disassembler(ABC):
         self.binary = None
         self.functions.clear()
 
-    def get_strings(self, binary_io: IO) -> Iterable[bytes]:
+    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         """
         Returns the list of defined strings in the binary
         :param binary_io: a file-like object to the binary ingested
@@ -367,7 +371,7 @@ class Disassembler(ABC):
                     i += 1
 
                 if buff[i] == 0 and i > 3:
-                    strings.append(buff[:i])
+                    strings.append(str(buff[:i], "ascii"))
                     buff = buff[i + 1 :]
                 else:
                     buff = buff[1:]
@@ -429,11 +433,11 @@ class Disassembler(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def analyze(self, path) -> bool:
+    def analyze(self, path) -> Tuple[bool, Optional[str]]:
         """
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
-        :returns: True on success, false otherwise
+        :returns: (True, optional message) on success, (False, failure reason) otherwise
         """
         raise NotImplementedError
 

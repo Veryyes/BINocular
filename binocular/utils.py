@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Type, Dict
-from collections import defaultdict
-import subprocess
 import posixpath
-from urllib.parse import urlsplit, unquote
+import subprocess
+from collections import defaultdict
+from typing import Dict, List, Tuple, Type
+from urllib.parse import unquote, urlsplit
 
 from archinfo import (
     ArchAArch64,
@@ -12,18 +12,17 @@ from archinfo import (
     ArchARM,
     ArchARMCortexM,
     ArchARMEL,
-    ArchARMEL,
     ArchARMHF,
     ArchAVR8,
     ArchMIPS32,
     ArchMIPS64,
+    ArchNotFound,
     ArchPPC32,
     ArchPPC64,
     ArchRISCV64,
     ArchS390X,
     ArchSoot,
     ArchX86,
-    ArchNotFound,
 )
 
 arches: List[Type] = [

@@ -1,16 +1,16 @@
+import logging
 import os
+import string
 from enum import Enum
 from pathlib import Path
-from typing_extensions import Annotated
-import string
-import logging
+from typing import Optional, Type
 
+import IPython
 import typer
 from sqlalchemy.orm import Session
-import IPython
+from typing_extensions import Annotated
 
-from binocular import Backend, Ghidra, Rizin
-from binocular import logger
+from binocular import Backend, Disassembler, Ghidra, Rizin
 
 app = typer.Typer()
 
@@ -24,7 +24,9 @@ class DisassemblerChoice(Enum):
 def parse(
     path: Annotated[Path, typer.Argument(help="Path to Binary")],
     disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
-    uri: Annotated[str, typer.Option("-u", "--uri", help="SQL database URI")] = None,
+    uri: Annotated[
+        Optional[str], typer.Option("-u", "--uri", help="SQL database URI")
+    ] = None,
     quiet: Annotated[
         bool, typer.Option("-q", "--quiet", help="Supress Analysis Output")
     ] = False,
@@ -36,7 +38,7 @@ def parse(
         bool, typer.Option("-j", "--json", help="Output parsed binary as json data")
     ] = False,
 ):
-    disasm_type = None
+    disasm_type: Optional[Type[Disassembler]] = None
     if disassm == DisassemblerChoice.rizin:
         disasm_type = Rizin
     elif disassm == DisassemblerChoice.ghidra:
@@ -61,8 +63,6 @@ def parse(
         disasm.load(path)
         b = disasm.binary
         if json:
-            import json
-
             print(b.model_dump_json())
         elif not quiet:
             print("Binary:")
@@ -88,7 +88,7 @@ def parse(
 def install(
     disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
     version: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             "-v",
             "--version",
@@ -96,7 +96,8 @@ def install(
         ),
     ] = None,
     path: Annotated[
-        str, typer.Option("-p", "--path", help="Path to install disassembler to")
+        Optional[str],
+        typer.Option("-p", "--path", help="Path to install disassembler to"),
     ] = None,
     l: Annotated[
         bool,
@@ -105,12 +106,15 @@ def install(
         ),
     ] = False,
 ):
-    disasm_type = None
+    disasm_type: Optional[Type[Disassembler]] = None
     if disassm == DisassemblerChoice.rizin:
         disasm_type = Rizin
     elif disassm == DisassemblerChoice.ghidra:
         disasm_type = Ghidra
     else:
+        raise ValueError("Not a supported Disassembler")
+
+    if disasm_type is None:
         raise ValueError("Not a supported Disassembler")
 
     if l:

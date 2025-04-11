@@ -35,6 +35,7 @@ setup(
             "build",
             "types-networkx",
             "black",
+            "types-requests",
         ]
     },
     entry_points={"console_scripts": ["binocular = binocular.run:main"]},

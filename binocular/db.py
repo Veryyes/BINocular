@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import List, Optional
 
-from .consts import Endian, IL, RefType, BranchType
-
-from sqlalchemy import Table, Column, ForeignKey, String, select, Integer, BigInteger
+from sqlalchemy import BigInteger, Column, ForeignKey, Integer, String, Table, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from .consts import IL, BranchType, Endian, RefType
 
 MAX_STR_SIZE = 512
 

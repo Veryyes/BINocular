@@ -1,28 +1,33 @@
 from __future__ import annotations
-from collections.abc import Iterable
-from collections import defaultdict, OrderedDict
-from typing import Any, Optional, Tuple, List, IO
-from pathlib import Path
-import os
-import shutil
-import pkgutil
+
 import binascii
-import requests
 import json
-import tempfile
 import lzma
+import os
+import pkgutil
+import shutil
 import tarfile
+import tempfile
+from collections import OrderedDict, defaultdict
+from collections.abc import Iterable
+from pathlib import Path
+from typing import IO, Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.request import urlopen
 
-from .disassembler import Disassembler
-from .primitives import Instruction, IR, Branch, Argument, Reference, RefType, Variable
-from .consts import Endian, BranchType, IL
-from .utils import run_proc
-from . import logger
-
-from git import Repo
 import git
+import requests  # type: ignore[import-untyped]
 import rzpipe
+from git import Repo
+
+from . import logger
+from .consts import IL, BranchType, Endian
+from .disassembler import Disassembler
+from .primitives import IR, Argument, Branch, Instruction, Reference, RefType, Variable
+from .utils import run_proc
+
+
+class RZPipeNotOpen(Exception):
+    pass
 
 
 class Rizin(Disassembler):
@@ -71,10 +76,10 @@ class Rizin(Disassembler):
     @classmethod
     def install(
         cls,
-        version: str = None,
-        install_dir=None,
-        build=False,
-        local_install_file: str = None,
+        version: Optional[str] = None,
+        install_dir: Optional[str] = None,
+        build: Optional[bool] = False,
+        local_install_file: Optional[str] = None,
     ) -> str:
         """Installs the disassembler to a user specified directory or within the python module if none is specified"""
         logger.info("Installing Rizin")
@@ -104,7 +109,7 @@ class Rizin(Disassembler):
 
             for cmd in cmds:
                 logger.info(f"$ {' '.join(cmd)}")
-                out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
+                out, err = run_proc(cmd=cmd, cwd=install_dir)
                 if len(out) > 0:
                     logger.info(f"[STDOUT] {out}")
                 if len(err) > 0:
@@ -154,15 +159,15 @@ class Rizin(Disassembler):
         logger.info("Rizin Install Completed")
         return install_dir
 
-    def __init__(self, verbose=True, home: str = None) -> None:
+    def __init__(self, verbose=True, home: Optional[str] = None) -> None:
         super().__init__(verbose=verbose)
-        self.rizin_home = home
-        self._pipe = None
+        self.rizin_home: Optional[str] = home
+        self._pipe: Optional[rzpipe.open] = None
 
-        self._bin_info = None
-        self._thunk_dict = dict()
-        self._caller_cache = defaultdict(lambda: set())
-        self._calls_cache = defaultdict(lambda: set())
+        self._bin_info: Optional[Any] = None
+        self._thunk_dict: Dict[int, bool] = dict()
+        self._caller_cache: defaultdict[int, Set] = defaultdict(lambda: set())
+        self._calls_cache: defaultdict[int, Set] = defaultdict(lambda: set())
 
     def close(self):
         """Release/Free up any resources"""
@@ -179,11 +184,11 @@ class Rizin(Disassembler):
         self._caller_cache = defaultdict(lambda: set())
         self._calls_cache = defaultdict(lambda: set())
 
-    def analyze(self, path) -> bool:
+    def analyze(self, path) -> Tuple[bool, Optional[str]]:
         """
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
-        :returns: True on success, false otherwise
+        :returns: (True, optional message) on success, (False, failure reason) otherwise
         """
         if isinstance(path, Path):
             path = str(path)
@@ -218,6 +223,8 @@ class Rizin(Disassembler):
 
     def get_entry_point(self) -> int:
         """Returns the address of the entry point to the function"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
         return self._pipe.cmdj("iej")[0]["vaddr"]
 
     def get_architecture(self) -> str:
@@ -226,10 +233,16 @@ class Rizin(Disassembler):
         For best results use either archinfo, qemu, or compilation triplet naming conventions.
         https://github.com/angr/archinfo
         """
+        if self._bin_info is None:
+            raise Disassembler.AnalyzeNotRun
+
         return self._bin_info["arch"]
 
     def get_endianness(self) -> Endian:
         """Returns an Enum representing the Endianness"""
+        if self._bin_info is None:
+            raise Disassembler.AnalyzeNotRun
+
         if self._bin_info["endian"] == "LE":
             return Endian.LITTLE
         elif self._bin_info["endian"] == "BE":
@@ -239,18 +252,30 @@ class Rizin(Disassembler):
 
     def get_bitness(self) -> int:
         """Returns the word size of the architecture (e.g., 16, 32, 64)"""
+        if self._bin_info is None:
+            raise Disassembler.AnalyzeNotRun
+
         return self._bin_info["bits"]
 
     def get_base_address(self) -> int:
         """Returns the base address the binary is based at"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         return int(self._pipe.cmd("echo $B"), 16)
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         """Returns the list of defined strings in the binary"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         return [s["string"] for s in self._pipe.cmdj("izj")]
 
     def get_dynamic_libs(self) -> Iterable[str]:
         """Returns the list of names of the dynamic libraries used in this binary"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         return [l for l in self._pipe.cmdj("ilj")]
 
     def get_func_iterator(self) -> Iterable[Any]:
@@ -260,6 +285,9 @@ class Rizin(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         """
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         for f in self._pipe.cmdj("aflj"):
             yield f
 
@@ -269,6 +297,9 @@ class Rizin(Disassembler):
 
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
         """Returns the name of the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj("afsj")
         name = signature["name"]
@@ -287,6 +318,9 @@ class Rizin(Disassembler):
 
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
         """Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj("afsj")
         return [
@@ -316,6 +350,9 @@ class Rizin(Disassembler):
         return RefType.UNKNOWN
 
     def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
         xref_data = self._pipe.cmdj("afxj")
         for xref in xref_data:
@@ -329,8 +366,11 @@ class Rizin(Disassembler):
                 type=self._parse_xref_type(xref["type"]),
             )
 
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> int:
+    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
         """Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
         signature = self._pipe.cmdj("afsj")
 
@@ -338,14 +378,20 @@ class Rizin(Disassembler):
 
     def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
         """Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
 
         return self._pipe.cmdj("afij")[0]["stackframe"]
 
     def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
         """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
-        vars = list()
+        vars: List[Variable] = list()
         if "stack" not in self._pipe.cmdj("afvlj"):
             return vars
 
@@ -380,6 +426,9 @@ class Rizin(Disassembler):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         """
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {addr}")
         for bb in self._pipe.cmdj("afbj"):
             yield bb
@@ -412,10 +461,13 @@ class Rizin(Disassembler):
 
     def get_bb_instructions(
         self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any
-    ) -> List[Tuple(bytes, str)]:
+    ) -> List[Tuple[bytes, str]]:
         """
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         instrs = list()
 
         self._pipe.cmd(f"s {bb_addr}")
@@ -435,6 +487,9 @@ class Rizin(Disassembler):
         """
         Returns the Intermediate Representation data based on the instruction given
         """
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {instr_addr}")
         instr_data = self._pipe.cmdj(f"pdj 1")[0]
         ir = instr_data.get("esil", None)
@@ -445,6 +500,9 @@ class Rizin(Disassembler):
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
         """Return comments at the instruction"""
+        if self._pipe is None:
+            raise RZPipeNotOpen
+
         self._pipe.cmd(f"s {instr_addr}")
         instr_data = self._pipe.cmdj(f"pdj 1")[0]
 
