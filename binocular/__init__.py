@@ -1,9 +1,9 @@
-import coloredlogs # type: ignore[import-untyped]
+import coloredlogs  # type: ignore[import-untyped]
 import logging
+
 logger = logging.getLogger("BINocular")
 logger.addHandler(logging.FileHandler("logs.txt"))
-coloredlogs.install(
-    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 from .primitives import (
     Argument,
@@ -14,15 +14,10 @@ from .primitives import (
     NativeFunction,
     SourceFunction,
     Binary,
-    Variable
+    Variable,
 )
 
-from .consts import (
-    Endian,
-    BranchType,
-    IL,
-    IndirectToken
-)
+from .consts import Endian, BranchType, IL, IndirectToken
 
 from .ghidra import Ghidra
 from .rizin import Rizin

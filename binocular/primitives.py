@@ -18,16 +18,31 @@ from pydantic.dataclasses import dataclass
 from sqlalchemy.orm import Session
 import pyvex
 
-from .db import NameORM, StringsORM, BinaryORM, NativeFunctionORM, BasicBlockORM, InstructionORM, IR_ORM, SourceFunctionORM, MetaInfo, ReferenceORM, VariableORM, BranchORM, MAX_STR_SIZE
+from .db import (
+    NameORM,
+    StringsORM,
+    BinaryORM,
+    NativeFunctionORM,
+    BasicBlockORM,
+    InstructionORM,
+    IR_ORM,
+    SourceFunctionORM,
+    MetaInfo,
+    ReferenceORM,
+    VariableORM,
+    BranchORM,
+    MAX_STR_SIZE,
+)
 from .consts import Endian, BranchType, IL, IndirectToken, RefType
 from .utils import str2archinfo
 from .source import C_Code
 
 
-parsers:Dict[str, Optional[Type]] = defaultdict(lambda: None)
-parsers['C'] = C_Code
+parsers: Dict[str, Optional[Type]] = defaultdict(lambda: None)
+parsers["C"] = C_Code
 
-def bytes_validator(x:Union[bytes,bytearray,str]) -> bytes:
+
+def bytes_validator(x: Union[bytes, bytearray, str]) -> bytes:
     if isinstance(x, bytes):
         return x
     if isinstance(x, bytearray):
@@ -36,23 +51,29 @@ def bytes_validator(x:Union[bytes,bytearray,str]) -> bytes:
         return bytes.fromhex(x)
     raise ValueError(f"Does not appear to be bytes or hexstring: {x}")
 
-Bytes = Annotated[bytes, PlainValidator(bytes_validator), PlainSerializer(lambda x: x.hex())]
+
+Bytes = Annotated[
+    bytes, PlainValidator(bytes_validator), PlainSerializer(lambda x: x.hex())
+]
+
 
 class NoDBException(Exception):
     pass
 
+
 class NoContextException(Exception):
     pass
 
+
 class Branch(BaseModel):
-    '''
+    """
     Describes a branch in control flow
-    '''
+    """
 
     type: BranchType
-    '''Type of Jump'''
+    """Type of Jump"""
     target: Optional[int]
-    '''Address to Jump to'''
+    """Address to Jump to"""
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -60,32 +81,28 @@ class Branch(BaseModel):
 
     @classmethod
     def from_orm(cls, orm):
-        return cls(
-            type=orm.type,
-            target=orm.target
-        )
+        return cls(type=orm.type, target=orm.target)
 
     def __hash__(self):
         return hash((self.type, self.target))
 
     def orm(self):
-        return BranchORM(
-            type = self.type,
-            target = self.target
-        )
+        return BranchORM(type=self.type, target=self.target)
 
 
 @dataclass
 class IR:
-    '''
+    """
     Represents a series of intermediate instruction(s) that correspond to a single assembly instruction
-    '''
+    """
+
     lang_name: IL
     data: str
 
 
 class Variable(BaseModel):
-    '''Represents a Variable recovered from compiled code'''
+    """Represents a Variable recovered from compiled code"""
+
     data_type: str
     name: str
     is_register: bool
@@ -103,7 +120,7 @@ class Variable(BaseModel):
             name=orm.name,
             is_register=orm.is_register,
             is_stack=orm.is_stack,
-            stack_offset=orm.stack_offset
+            stack_offset=orm.stack_offset,
         )
 
     def orm(self):
@@ -112,12 +129,13 @@ class Variable(BaseModel):
             name=self.name,
             is_register=self.is_register,
             is_stack=self.is_stack,
-            stack_offset=self.stack_offset
+            stack_offset=self.stack_offset,
         )
 
 
 class Reference(BaseModel):
-    '''Represents a single Reference at a given address pointing to another address'''
+    """Represents a single Reference at a given address pointing to another address"""
+
     from_: int
     to: int
     type: RefType
@@ -128,11 +146,7 @@ class Reference(BaseModel):
 
     @classmethod
     def from_orm(cls, orm):
-        return cls(
-            from_=orm.from_addr,
-            to=orm.to_addr,
-            type=orm.type
-        )
+        return cls(from_=orm.from_addr, to=orm.to_addr, type=orm.type)
 
     def __hash__(self):
         return hash((self.from_, self.to, self.type.value))
@@ -141,24 +155,20 @@ class Reference(BaseModel):
         return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
 
     def orm(self):
-        return ReferenceORM(
-            from_addr=self.from_,
-            to_addr=self.to,
-            type=self.type
-        )
+        return ReferenceORM(from_addr=self.from_, to_addr=self.to, type=self.type)
 
 
 class Argument(BaseModel):
-    '''Represents a single argument in a function'''
+    """Represents a single argument in a function"""
 
     data_type: Optional[str] = None
-    '''Argument data type (e.g., char, int, short*, struct socket, long(*)(char*))'''
+    """Argument data type (e.g., char, int, short*, struct socket, long(*)(char*))"""
 
     var_name: Optional[str] = None
-    '''Argument Variable Name'''
+    """Argument Variable Name"""
 
     var_args: bool = False
-    '''True when the argument is Variadic (i.e. more than one argument, like printf)'''
+    """True when the argument is Variadic (i.e. more than one argument, like printf)"""
 
     # TODO pydantic alias fields
     # so we can represent args in multiple langs?
@@ -172,16 +182,12 @@ class Argument(BaseModel):
             data = data.strip()
 
             if data == "...":
-                return Argument(
-                    data_type=None,
-                    var_name=None,
-                    var_args=True
-                )
+                return Argument(data_type=None, var_name=None, var_args=True)
             data_type, var_name = data.rsplit(" ", 1)
 
             # move pointer to the data type
             while var_name.startswith("*"):
-                data_type += '*'
+                data_type += "*"
                 var_name = var_name[1:]
 
             return Argument(
@@ -198,7 +204,8 @@ class Argument(BaseModel):
 
 
 class NativeCode(BaseModel):
-    '''A Base class to represent attributes of compiled code generally'''
+    """A Base class to represent attributes of compiled code generally"""
+
     endianness: Optional[Endian] = None
     architecture: Optional[str] = None
     bitness: Optional[int] = None
@@ -214,7 +221,7 @@ class NativeCode(BaseModel):
                 fields.append(f"{f}={field}")
             elif isinstance(field, bytes):
                 fields.append(f"{f}=0x{field.hex()}")
-            elif getattr(field, '__len__', None) is not None:
+            elif getattr(field, "__len__", None) is not None:
                 fields.append(f"len({f})={len(field)}")
             else:
                 fields.append(f"{f}={field}")
@@ -223,7 +230,8 @@ class NativeCode(BaseModel):
 
 
 class Instruction(NativeCode):
-    '''Represents a single instruction'''
+    """Represents a single instruction"""
+
     address: Optional[int] = None
     data: Bytes
     asm: Optional[str] = ""
@@ -235,7 +243,7 @@ class Instruction(NativeCode):
         return InstructionORM
 
     @classmethod
-    def from_orm(cls, orm, ir_type:Optional[IL]=None):
+    def from_orm(cls, orm, ir_type: Optional[IL] = None):
         instruction = cls(
             endianness=orm.endianness,
             architecture=orm.architecture,
@@ -243,7 +251,7 @@ class Instruction(NativeCode):
             address=orm.address,
             data=orm.bytes,
             asm=orm.asm,
-            comment=orm.comment
+            comment=orm.comment,
         )
 
         if len(orm.ir) > 0:
@@ -257,11 +265,8 @@ class Instruction(NativeCode):
                 for ir_data in orm.ir:
                     if ir_data.lang == ir_type:
                         break
-                
-            ir = IR(
-                lang_name=ir_data.lang,
-                data=ir_data.data
-            )
+
+            ir = IR(lang_name=ir_data.lang, data=ir_data.data)
             instruction.ir = ir
 
         return instruction
@@ -272,7 +277,7 @@ class Instruction(NativeCode):
     def __eq__(self, other: object):
         if not isinstance(other, Instruction):
             return False
-            
+
         return self.data == other.data
 
     def __hash__(self):
@@ -297,11 +302,7 @@ class Instruction(NativeCode):
 
         ir = None
         if self.ir is not None:
-            ir = IR_ORM(
-                lang=self.ir.lang_name,
-                data=self.ir.data,
-                instruction=i
-            )
+            ir = IR_ORM(lang=self.ir.lang_name, data=self.ir.data, instruction=i)
             i.ir.append(ir)
 
         return i, ir
@@ -317,11 +318,14 @@ class Instruction(NativeCode):
             address = 0
 
         il = pyvex.lift(self.data, address, str2archinfo(self.architecture))
-        return IR(lang_name=IL.VEX, data=";".join([stmt.pp_str() for stmt in il.statements]))
+        return IR(
+            lang_name=IL.VEX, data=";".join([stmt.pp_str() for stmt in il.statements])
+        )
 
 
 class BasicBlock(NativeCode):
-    '''Represents a Basic Block'''
+    """Represents a Basic Block"""
+
     _function: Optional[NativeFunction] = None
 
     address: Optional[int] = None
@@ -346,7 +350,7 @@ class BasicBlock(NativeCode):
             endianness=orm.endianness,
             bitness=orm.bitness,
             xrefs=set(Reference.from_orm(ref) for ref in orm.xrefs),
-            branches=set(Branch.from_orm(b) for b in orm.branches)
+            branches=set(Branch.from_orm(b) for b in orm.branches),
         )
 
         for instr_orm in orm.instructions:
@@ -362,7 +366,9 @@ class BasicBlock(NativeCode):
 
             self.block_cache = dict()
             if block._function is None:
-                raise RuntimeError(f"BasicBlock {block.address} has no function associated with it")
+                raise RuntimeError(
+                    f"BasicBlock {block.address} has no function associated with it"
+                )
             for bb in block._function.basic_blocks:
                 self.block_cache[bb.address] = bb
 
@@ -413,7 +419,7 @@ class BasicBlock(NativeCode):
         raise TypeError
 
     def __bytes__(self):
-        b = b''
+        b = b""
         for instr in self.instructions:
             b += instr.data
         return b
@@ -447,7 +453,7 @@ class BasicBlock(NativeCode):
             bitness=self.bitness,
             size=len(self),
             xrefs=[xref.orm() for xref in self.xrefs],
-            branches=[branch.orm() for branch in self.branches]
+            branches=[branch.orm() for branch in self.branches],
         )
 
         for instr in self.instructions:
@@ -466,10 +472,12 @@ class BasicBlock(NativeCode):
                 for ir in instr.ir:
                     session.add(ir)
 
+
 class NativeFunction(NativeCode):
-    '''
+    """
     Represents a natively compiled function
-    '''
+    """
+
     _block_lookup: Dict[int, BasicBlock] = dict()
     _binary: Optional[Binary] = None
 
@@ -488,7 +496,7 @@ class NativeFunction(NativeCode):
     basic_blocks: Set[BasicBlock] = set([])
     end_block_addrs: Set[int] = set([])
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def _populate_cache(self):
         for bb in self.basic_blocks:
             self._block_lookup[bb.address] = bb
@@ -511,8 +519,11 @@ class NativeFunction(NativeCode):
             stack_frame_size=orm.stack_frame_size,
             return_type=orm.return_type,
             thunk=orm.thunk,
-            argv=[Argument.from_literal(arg) for arg in orm.argv.split(
-                ",") if len(orm.argv) > 0],
+            argv=[
+                Argument.from_literal(arg)
+                for arg in orm.argv.split(",")
+                if len(orm.argv) > 0
+            ],
         )
         for var in orm.variables:
             f.variables.append(Variable.from_orm(var))
@@ -545,7 +556,7 @@ class NativeFunction(NativeCode):
         raise TypeError
 
     def __bytes__(self):
-        '''Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block'''
+        """Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
         bbs = sorted(bbs, key=lambda b: b.address)
 
@@ -564,7 +575,7 @@ class NativeFunction(NativeCode):
 
     @property
     def calls(self):
-        '''Functions that this Function Calls'''
+        """Functions that this Function Calls"""
         if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
 
@@ -575,7 +586,7 @@ class NativeFunction(NativeCode):
 
     @property
     def callers(self):
-        '''Functions that call this Function'''
+        """Functions that call this Function"""
         if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
 
@@ -586,14 +597,14 @@ class NativeFunction(NativeCode):
 
     @cached_property
     def cfg(self) -> nx.MultiDiGraph:
-        '''Control Flow Graph of the Function'''
+        """Control Flow Graph of the Function"""
 
-        cfg:nx.MultiDiGraph = nx.MultiDiGraph()
+        cfg: nx.MultiDiGraph = nx.MultiDiGraph()
         self._cfg(set(), cfg, self.start())
 
         return cfg
 
-    def _cfg(self, history, g, bb:BasicBlock):
+    def _cfg(self, history, g, bb: BasicBlock):
         if bb in history:
             return
 
@@ -612,23 +623,25 @@ class NativeFunction(NativeCode):
 
     @cached_property
     def xrefs(self) -> Set[Reference]:
-        '''Cross References Within the Function'''
+        """Cross References Within the Function"""
         xrefs = set()
         for bb in self.basic_blocks:
             xrefs |= bb.xrefs
         return xrefs
 
-    @computed_field(repr=False) # type: ignore[misc]
+    @computed_field(repr=False)  # type: ignore[misc]
     @cached_property
     def sha256(self) -> str:
-        bbs = sorted(self.basic_blocks, key=lambda b: 0 if b.address is None else b.address) 
+        bbs = sorted(
+            self.basic_blocks, key=lambda b: 0 if b.address is None else b.address
+        )
         func_bytes = b"".join([bytes(bb) for bb in bbs])
         return hashlib.sha256(func_bytes).hexdigest()
 
     def disasm(self) -> str:
-        '''Returns disassembled instructions from the lowest addressed basic block to the end of the largest addressed basic block'''
+        """Returns disassembled instructions from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
-        bbs = sorted(bbs, key=lambda b: 0 if b.address is None else b.address) 
+        bbs = sorted(bbs, key=lambda b: 0 if b.address is None else b.address)
 
         asm = []
         for bb in bbs:
@@ -639,9 +652,9 @@ class NativeFunction(NativeCode):
         return "\n".join(asm)
 
     def ir(self) -> str:
-        '''Returns lifed intermediate representation of instructions from the lowest addressed basic block to the end of the largest addressed basic block'''
+        """Returns lifed intermediate representation of instructions from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
-        bbs = sorted(bbs, key=lambda b: 0 if b.address is None else b.address) 
+        bbs = sorted(bbs, key=lambda b: 0 if b.address is None else b.address)
 
         ir = []
         for bb in bbs:
@@ -663,7 +676,7 @@ class NativeFunction(NativeCode):
             sha256=self.sha256,
             return_type=self.return_type,
             thunk=self.thunk,
-            argv=", ".join(str(arg) for arg in self.argv)
+            argv=", ".join(str(arg) for arg in self.argv),
         )
 
         return func
@@ -673,14 +686,15 @@ class NativeFunction(NativeCode):
         with session.no_autoflush:
             if NativeFunctionORM.exists_in_binary(session, binary.sha256, self.sha256):
                 f_orm = NativeFunctionORM.select_hash_by_binary(
-                    session, binary.sha256, self.sha256)
+                    session, binary.sha256, self.sha256
+                )
             else:
                 f_orm = self.orm()
                 f_orm.binary = binary
                 session.add(f_orm)
 
             if not self.thunk:
-                sources:List[SourceFunction] = list()
+                sources: List[SourceFunction] = list()
                 for src in self.sources:
                     for src_other in sources:
                         if src.sha256 == src_other.sha256:
@@ -700,16 +714,18 @@ class NativeFunction(NativeCode):
                         src_orm.compiled.append(f_orm)
                         session.add(src_orm)
                     else:
-                        src_orm = SourceFunctionORM.select_hash(
-                            session, src.sha256)
+                        src_orm = SourceFunctionORM.select_hash(session, src.sha256)
                         src_orm.compiled.append(f_orm)
 
             for called in self.calls:
                 if called == self:
                     c = f_orm
-                elif NativeFunctionORM.exists_in_binary(session, binary.sha256, called.sha256):
+                elif NativeFunctionORM.exists_in_binary(
+                    session, binary.sha256, called.sha256
+                ):
                     c = NativeFunctionORM.select_hash_by_binary(
-                        session, binary.sha256, called.sha256)
+                        session, binary.sha256, called.sha256
+                    )
                 else:
                     c = called.orm()
                     c.binary = binary
@@ -720,9 +736,12 @@ class NativeFunction(NativeCode):
             for caller in self.callers:
                 if caller == self:
                     c = f_orm
-                elif NativeFunctionORM.exists_in_binary(session, binary.sha256, caller.sha256):
+                elif NativeFunctionORM.exists_in_binary(
+                    session, binary.sha256, caller.sha256
+                ):
                     c = NativeFunctionORM.select_hash_by_binary(
-                        session, binary.sha256, caller.sha256)
+                        session, binary.sha256, caller.sha256
+                    )
                 else:
                     c = caller.orm()
                     c.binary = binary
@@ -751,23 +770,24 @@ class NativeFunction(NativeCode):
 
 
 class SourceFunction(BaseModel):
-    '''
+    """
     Representation of the source code of a function.
     Currently tailored around C functions
-    '''
+    """
+
     _tree_sitter_root = None
 
     lang: str = "C"
     name: str
     decompiled: bool
     perfect_decomp: Optional[bool] = False
-    '''True if the decompilation is exactly the true source code'''
+    """True if the decompilation is exactly the true source code"""
 
     source: str
     argv: Optional[List[Argument]] = list()
     return_type: Optional[str] = ""
     qualifiers: Set[str] = set()
-    '''Function Qualifiers such as `const`, `volatile`, or `static`'''
+    """Function Qualifiers such as `const`, `volatile`, or `static`"""
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -782,14 +802,24 @@ class SourceFunction(BaseModel):
             source=orm.source,
             name=orm.name,
             return_type=orm.return_type,
-            argv=[Argument.from_literal(arg) for arg in orm.argv.split(
-                ",") if len(orm.argv) > 0],
-            qualifiers=set(orm.qualifiers.split(" "))
+            argv=[
+                Argument.from_literal(arg)
+                for arg in orm.argv.split(",")
+                if len(orm.argv) > 0
+            ],
+            qualifiers=set(orm.qualifiers.split(" ")),
         )
 
     @classmethod
-    def from_file(cls, fname: str, filepath: str, encoding: str = 'utf8', lang: str = 'C', is_decompiled=False):
-        '''
+    def from_file(
+        cls,
+        fname: str,
+        filepath: str,
+        encoding: str = "utf8",
+        lang: str = "C",
+        is_decompiled=False,
+    ):
+        """
         Parse a function from the given file and create a SourceFunction object
         :param fname: the function name
         :param filepath: the path to the source function
@@ -797,13 +827,26 @@ class SourceFunction(BaseModel):
         :param lang: the programming language the source code is in
         :param is_decompiled: True if the file is decompiled
         :returns: a SourceFunction object representing function `fname`; None if no such function exists in the file
-        '''
-        with open(filepath, 'rb') as f:
-            return cls.from_code(fname, f.read(), lang=lang, encoding=encoding, is_decompiled=is_decompiled)
+        """
+        with open(filepath, "rb") as f:
+            return cls.from_code(
+                fname,
+                f.read(),
+                lang=lang,
+                encoding=encoding,
+                is_decompiled=is_decompiled,
+            )
 
     @classmethod
-    def from_code(cls, fname: str, source: Union[str, bytes], encoding: str = 'utf8', lang: str = 'C', is_decompiled=False):
-        '''
+    def from_code(
+        cls,
+        fname: str,
+        source: Union[str, bytes],
+        encoding: str = "utf8",
+        lang: str = "C",
+        is_decompiled=False,
+    ):
+        """
         Parse a function from the source code and create a SourceFunction object
         :param fname: the function name
         :param source: the source code containing the function
@@ -811,7 +854,7 @@ class SourceFunction(BaseModel):
         :param lang: the programming language the source code is in
         :param is_decompiled: True if the file is decompiled
         :returns: a SourceFunction object representing function `fname`; None if no such function exists in the source
-        '''
+        """
         if isinstance(source, str):
             source = bytes(source, encoding)
 
@@ -824,7 +867,7 @@ class SourceFunction(BaseModel):
             return None
 
         src_func_dict = parser.normalize(f_root, encoding=encoding)
-        src_func_dict['decompiled'] = is_decompiled
+        src_func_dict["decompiled"] = is_decompiled
 
         function_source = cls.model_validate(src_func_dict)
         function_source._tree_sitter_root = f_root
@@ -840,22 +883,23 @@ class SourceFunction(BaseModel):
             source=self.source,
             return_type=self.return_type,
             argv=", ".join(str(arg) for arg in self.argv),
-            qualifiers=" ".join(self.qualifiers)
+            qualifiers=" ".join(self.qualifiers),
         )
 
     def __hash__(self):
         return int(self.sha256, 16)
 
-    @computed_field(repr=False) # type: ignore[misc]
-    @cached_property 
+    @computed_field(repr=False)  # type: ignore[misc]
+    @cached_property
     def sha256(self) -> str:
-        '''sha256 hex digest of the file'''
-        return hashlib.sha256(bytes(self.source, 'utf8')).hexdigest()
+        """sha256 hex digest of the file"""
+        return hashlib.sha256(bytes(self.source, "utf8")).hexdigest()
+
 
 class Binary(NativeCode):
-    '''
+    """
     Represents a Binary Blob or executable format. This maps 1 to 1 of what you'd load into a disassembler (e.g., ELF, PE, MACH-O, Firmware Dump, Binary Blob)
-    '''
+    """
 
     class NoDataException(Exception):
         pass
@@ -874,7 +918,7 @@ class Binary(NativeCode):
     filename: Optional[Union[str, List[str]]] = None
 
     names: List[str] = []
-    '''names this binary has gone by (multiple are possbile when loading data from a database)'''
+    """names this binary has gone by (multiple are possbile when loading data from a database)"""
 
     entrypoint: Optional[int] = None
     os: Optional[str] = None
@@ -889,13 +933,12 @@ class Binary(NativeCode):
     # User defined tags
     tags: Set[str] = set([])
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def _populate_cache(self):
         for f in self.functions:
             self._function_lookup[f.address] = f
             f._binary = self
         return self
-
 
     @classmethod
     def orm_type(cls) -> Type:
@@ -929,7 +972,7 @@ class Binary(NativeCode):
             os=orm.os,
             base_addr=orm.base_addr,
             sha256=orm.sha256,
-            tags=orm.tags.split(",")
+            tags=orm.tags.split(","),
         )
         b.set_path(orm.metainfo.path)
 
@@ -964,7 +1007,7 @@ class Binary(NativeCode):
             return x in bytes(self)
 
     def __bytes__(self):
-        '''return the raw bytes of the binary'''
+        """return the raw bytes of the binary"""
         if self._bytes is not None:
             return self._bytes
 
@@ -979,10 +1022,7 @@ class Binary(NativeCode):
         name = NameORM(name=self.filename)
         strings = [StringsORM(value=s[:MAX_STR_SIZE]) for s in self.strings]
 
-        metainfo = MetaInfo(
-            path=str(self._path),
-            compressed=False
-        )
+        metainfo = MetaInfo(path=str(self._path), compressed=False)
 
         b = BinaryORM(
             metainfo=metainfo,
@@ -998,7 +1038,7 @@ class Binary(NativeCode):
             compilation_flags=self.compilation_flags,
             dynamic_libs=",".join(list(self.dynamic_libs)),
             sha256=self.sha256,
-            tags=",".join(self.tags)
+            tags=",".join(self.tags),
         )
 
         return b
@@ -1017,8 +1057,8 @@ class Binary(NativeCode):
 
     @cached_property
     def call_graph(self) -> nx.MultiDiGraph:
-        '''Function Call Graph'''
-        g:nx.MultiDiGraph = nx.MultiDiGraph()
+        """Function Call Graph"""
+        g: nx.MultiDiGraph = nx.MultiDiGraph()
         for f in self.functions:
             g.add_node(f)
             for child_f in f.calls:
@@ -1029,14 +1069,14 @@ class Binary(NativeCode):
                 g.add_edge(f, parent_f)
         return g
 
-    @computed_field(repr=False) # type: ignore[misc]
+    @computed_field(repr=False)  # type: ignore[misc]
     @cached_property
     def sha256(self) -> str:
-        '''sha256 hex digest of the file'''
+        """sha256 hex digest of the file"""
         return hashlib.sha256(bytes(self)).hexdigest()
 
     def io(self) -> IO:
-        '''returns a stream/IO handle to the bytes of the binary. This function does not self close the stream'''
+        """returns a stream/IO handle to the bytes of the binary. This function does not self close the stream"""
         if self._path is not None:
             return self._path.open("rb")
 
@@ -1046,4 +1086,3 @@ class Binary(NativeCode):
             return tp
 
         raise Binary.NoDataException("Binary Object has no Path or data")
-

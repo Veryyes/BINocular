@@ -24,14 +24,17 @@ class DisassemblerChoice(Enum):
 def parse(
     path: Annotated[Path, typer.Argument(help="Path to Binary")],
     disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
-    uri: Annotated[str, typer.Option(
-        '-u', '--uri', help="SQL database URI")] = None,
-    quiet: Annotated[bool, typer.Option(
-        '-q', '--quiet', help="Supress Analysis Output")] = False,
-    interactive: Annotated[bool, typer.Option(
-        '-i', '--ipython', help="Launch an IPython shell after loading")] = False,
-    json: Annotated[bool, typer.Option(
-        '-j', '--json', help="Output parsed binary as json data")] = False
+    uri: Annotated[str, typer.Option("-u", "--uri", help="SQL database URI")] = None,
+    quiet: Annotated[
+        bool, typer.Option("-q", "--quiet", help="Supress Analysis Output")
+    ] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option("-i", "--ipython", help="Launch an IPython shell after loading"),
+    ] = False,
+    json: Annotated[
+        bool, typer.Option("-j", "--json", help="Output parsed binary as json data")
+    ] = False,
 ):
     disasm_type = None
     if disassm == DisassemblerChoice.rizin:
@@ -59,6 +62,7 @@ def parse(
         b = disasm.binary
         if json:
             import json
+
             print(b.model_dump_json())
         elif not quiet:
             print("Binary:")
@@ -83,12 +87,23 @@ def parse(
 @app.command()
 def install(
     disassm: Annotated[DisassemblerChoice, typer.Argument(help="Disassembler")],
-    version: Annotated[str, typer.Option(
-        '-v', '--version', help="Version Number or Commit Hash (if applicable) to download, (build), and install ")] = None,
-    path: Annotated[str, typer.Option(
-        '-p', '--path', help="Path to install disassembler to")] = None,
-    l: Annotated[bool, typer.Option(
-        '-l', '--list', help="List available verions to download and install")] = False,
+    version: Annotated[
+        str,
+        typer.Option(
+            "-v",
+            "--version",
+            help="Version Number or Commit Hash (if applicable) to download, (build), and install ",
+        ),
+    ] = None,
+    path: Annotated[
+        str, typer.Option("-p", "--path", help="Path to install disassembler to")
+    ] = None,
+    l: Annotated[
+        bool,
+        typer.Option(
+            "-l", "--list", help="List available verions to download and install"
+        ),
+    ] = False,
 ):
     disasm_type = None
     if disassm == DisassemblerChoice.rizin:
@@ -104,14 +119,14 @@ def install(
         return
 
     build = False
-    if version is not None and (len(version) == 7 or len(version) == 40) and all(c in string.hexdigits for c in version):
+    if (
+        version is not None
+        and (len(version) == 7 or len(version) == 40)
+        and all(c in string.hexdigits for c in version)
+    ):
         build = True
 
-    disasm_type.install(
-        version=version,
-        install_dir=path,
-        build=build
-    )
+    disasm_type.install(version=version, install_dir=path, build=build)
 
 
 def main():

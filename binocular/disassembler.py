@@ -11,16 +11,27 @@ from typing import Any, Optional, Tuple, List, Dict, Set, IO
 from sqlalchemy.engine.base import Engine
 from sqlalchemy import create_engine
 
-from .primitives import (BasicBlock, Binary, NativeFunction, SourceFunction,
-                         Instruction, Argument, Branch, IR, Reference, Variable)
+from .primitives import (
+    BasicBlock,
+    Binary,
+    NativeFunction,
+    SourceFunction,
+    Instruction,
+    Argument,
+    Branch,
+    IR,
+    Reference,
+    Variable,
+)
 from .db import Base
 from .consts import Endian
 from . import logger
 
+
 class Backend:
-    '''
+    """
     Wrapper for a sqlachemy.Engine
-    '''
+    """
 
     engine: Optional[Engine] = None
 
@@ -33,38 +44,41 @@ class Backend:
         return Backend.engine
 
     def __init__(self, disassembler: Optional[Disassembler] = None):
-        self.disassembler:Optional[Disassembler] = disassembler
+        self.disassembler: Optional[Disassembler] = disassembler
 
     @property
     def db(self) -> Engine:
         if Backend.engine is None:
             raise RuntimeError("Engine must be set")
-        
+
         return Backend.engine
 
+
 class Disassembler(ABC):
-    '''
+    """
     Abstract Class for a Disassembler.
-    '''
+    """
 
     class FailedToLoadBinary(Exception):
-        '''Raise when a Disassembler fails to load a binary'''
+        """Raise when a Disassembler fails to load a binary"""
+
         pass
 
     class ArchitectureNotSupported(Exception):
-        '''Raise when a disassembler receives a binary of an architecture that it does not support'''
+        """Raise when a disassembler receives a binary of an architecture that it does not support"""
+
         pass
 
-    def __init__(self, verbose:bool=True):
-        self.verbose:bool = verbose
+    def __init__(self, verbose: bool = True):
+        self.verbose: bool = verbose
 
-        self._bb_count:int = 0
+        self._bb_count: int = 0
         self._func_names: Dict[str, NativeFunction] = dict()
         self._func_addrs: Dict[int, NativeFunction] = dict()
         self._bbs: Dict[int, BasicBlock] = dict()
         self._instrs: Dict[int, Instruction] = dict()
-        self.binary:Optional[Binary] = None
-        self.functions:List[NativeFunction] = list()
+        self.binary: Optional[Binary] = None
+        self.functions: List[NativeFunction] = list()
 
     def __enter__(self):
         return self.open()
@@ -73,14 +87,14 @@ class Disassembler(ABC):
         self.close()
 
     def name(self):
-        '''Returns the Name of the Disassembler'''
+        """Returns the Name of the Disassembler"""
         return self.__class__.__name__
 
     def load(self, path):
-        '''
+        """
         Load a binary into the disassembler and trigger any default analysis
         :param path: The file path to binary to analyze
-        '''
+        """
         logger.info(f"[{self.name()}] Analyzing {path}")
         self._binary_filepath = path
 
@@ -88,8 +102,7 @@ class Disassembler(ABC):
         success, err_msg = self.analyze(self._binary_filepath)
         if not success:
             raise Disassembler.FailedToLoadBinary(err_msg)
-        logger.info(
-            f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s")
+        logger.info(f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s")
 
         start = time.time()
         self._pre_normalize(path)
@@ -99,8 +112,7 @@ class Disassembler(ABC):
         for f in self.binary.functions:
             self.binary._function_lookup[f.address] = f
         self._post_normalize()
-        logger.info(
-            f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
+        logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
 
     def _create_binary(self):
         start = time.time()
@@ -113,19 +125,17 @@ class Disassembler(ABC):
             endianness=self.get_endianness(),
             bitness=self.get_bitness(),
             base_addr=self.get_base_address(),
-            dynamic_libs=self.get_dynamic_libs()
+            dynamic_libs=self.get_dynamic_libs(),
         )
         self.binary.set_path(self._binary_filepath)
 
         io_stream = self.binary.io()
-        self.binary.strings |= set(
-            self.get_strings(io_stream, len(self.binary)))
+        self.binary.strings |= set(self.get_strings(io_stream, len(self.binary)))
         io_stream.close()
 
         self.functions = set()
 
-        logger.info(
-            f"[{self.name()}] Binary Data Loaded: {time.time() - start:.2f}s")
+        logger.info(f"[{self.name()}] Binary Data Loaded: {time.time() - start:.2f}s")
 
     def _create_functions(self):
         count = 0
@@ -142,9 +152,8 @@ class Disassembler(ABC):
                 return_type=self.get_func_return_type(addr, func_ctxt),
                 argv=self.get_func_args(addr, func_ctxt),
                 thunk=self.is_func_thunk(addr, func_ctxt),
-                stack_frame_size=self.get_func_stack_frame_size(
-                    addr, func_ctxt),
-                variables=[v for v in self.get_func_vars(addr, func_ctxt)]
+                stack_frame_size=self.get_func_stack_frame_size(addr, func_ctxt),
+                variables=[v for v in self.get_func_vars(addr, func_ctxt)],
             )
             f._binary = self.binary
 
@@ -155,9 +164,7 @@ class Disassembler(ABC):
             dsrc = None
             if decompiled_code is not None:
                 dsrc = SourceFunction.from_code(
-                    fname=func_name,
-                    source=decompiled_code,
-                    is_decompiled=True
+                    fname=func_name, source=decompiled_code, is_decompiled=True
                 )
                 if dsrc is None:
                     # Failed to parse source with tree sitter :(
@@ -181,11 +188,15 @@ class Disassembler(ABC):
 
             if len(f.basic_blocks) > 0:
                 f.end_block_addrs = set(
-                    (bb.address for bb, out_degree in f.cfg.out_degree() if out_degree == 0))
-                    
+                    (
+                        bb.address
+                        for bb, out_degree in f.cfg.out_degree()
+                        if out_degree == 0
+                    )
+                )
+
             elif not f.thunk:
-                logger.warn(
-                    f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
+                logger.warn(f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
 
             # logger.info(f"Analysis Pass 1 - {func_name}: {time.time()-start:.2f}s")
 
@@ -211,7 +222,9 @@ class Disassembler(ABC):
         # logger.info(
         #     f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
-    def _create_basicblocks(self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]):
+    def _create_basicblocks(
+        self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]
+    ):
         if self.binary is None:
             raise RuntimeError("self.binary is not set!")
 
@@ -223,7 +236,7 @@ class Disassembler(ABC):
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
                 bitness=self.binary.bitness,
-                address=bb_addr
+                address=bb_addr,
             )
 
             for branch_data in self.get_next_bbs(bb_addr, bb_ctxt, addr, func_ctxt):
@@ -246,10 +259,11 @@ class Disassembler(ABC):
             self._bbs[bb_addr] = bb
 
         if len(xrefs) > 0 and len(f.basic_blocks) > 0:
-            logger.warn(
-                f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
+            logger.warn(f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
 
-    def _create_instructions(self, bb_addr: int, bb_ctxt: Any, bb: BasicBlock, func_ctxt: Any):
+    def _create_instructions(
+        self, bb_addr: int, bb_ctxt: Any, bb: BasicBlock, func_ctxt: Any
+    ):
         if self.binary is None:
             raise RuntimeError("self.binary is not set!")
 
@@ -262,7 +276,7 @@ class Disassembler(ABC):
                 address=cur_addr,
                 data=data,
                 asm=asm,
-                comment=self.get_instruction_comment(cur_addr)
+                comment=self.get_instruction_comment(cur_addr),
             )
             ir = self.get_ir_from_instruction(cur_addr, instr)
             instr.ir = ir
@@ -272,19 +286,19 @@ class Disassembler(ABC):
             cur_addr += len(data)
 
     def function_at(self, address: int) -> Optional[NativeFunction]:
-        '''Returns a Function at the address specified'''
+        """Returns a Function at the address specified"""
         return self._func_addrs.get(address, None)
 
     def function_sym(self, symbol: str) -> Optional[NativeFunction]:
-        '''Returns a Function with the given symbol names'''
+        """Returns a Function with the given symbol names"""
         return self._func_names.get(symbol, None)
 
     def basic_block(self, address: int) -> Optional[BasicBlock]:
-        '''Returns a basic block at the given address'''
+        """Returns a basic block at the given address"""
         return self._bbs.get(address, None)
 
     def instruction(self, address: int) -> Optional[Instruction]:
-        '''Returns the instruction at the given address'''
+        """Returns the instruction at the given address"""
         return self._instrs.get(address, None)
 
     ############################################
@@ -293,36 +307,36 @@ class Disassembler(ABC):
 
     @classmethod
     def list_versions(cls) -> List[str]:
-        '''List installable verions of this disassembler'''
+        """List installable verions of this disassembler"""
         return list()
 
     def _pre_normalize(self, path):
-        '''
+        """
         Optional Function to Override. _pre_normalize is called before the the binary
         at `path` is loaded into the underlying disassembler. This function provides
         a way to add a custom preprocessing step.
         :param path: path to the binary that is about to be analyzed
-        '''
+        """
         pass
 
     def _post_normalize(self):
-        '''
+        """
         Optional Function to Override. _post_normalize is called after the the binary
         at `path` is loaded into the underlying disassembler. This function provides
         a way to add a custom postprocessing step.
-        '''
+        """
         pass
 
     def open(self):
-        '''Open up any resources'''
+        """Open up any resources"""
         return self
 
     def close(self):
-        '''Release/Free up any resources'''
+        """Release/Free up any resources"""
         pass
 
     def clear(self):
-        '''Reset any state within this object'''
+        """Reset any state within this object"""
         self._bb_count = 0
         self._func_names.clear()
         self._func_addrs.clear()
@@ -332,13 +346,13 @@ class Disassembler(ABC):
         self.functions.clear()
 
     def get_strings(self, binary_io: IO) -> Iterable[bytes]:
-        '''
+        """
         Returns the list of defined strings in the binary
         :param binary_io: a file-like object to the binary ingested
         :returns: list of strings in the file (similar to the strings unix utility)
-        '''
+        """
         strings = list()
-        printables = bytes(string.printable, 'ascii')
+        printables = bytes(string.printable, "ascii")
 
         buff = b""
         while True:
@@ -349,39 +363,40 @@ class Disassembler(ABC):
 
             i = 0
             while len(buff) >= 5:
-                while (buff[i] in printables):
+                while buff[i] in printables:
                     i += 1
 
                 if buff[i] == 0 and i > 3:
                     strings.append(buff[:i])
-                    buff = buff[i+1:]
+                    buff = buff[i + 1 :]
                 else:
                     buff = buff[1:]
                 i = 0
 
         return strings
 
-
     def get_binary_name(self) -> str:
-        '''Returns the name of the binary loaded'''
+        """Returns the name of the binary loaded"""
         return os.path.basename(self._binary_filepath)
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
-        '''Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         return None
 
     def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
-        '''Return variables within the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
         return list()
 
-    def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> Optional[IR]:
-        '''
+    def get_ir_from_instruction(
+        self, instr_addr: int, instr: Instruction
+    ) -> Optional[IR]:
+        """
         Returns a list of Intermediate Representation data based on the instruction given
-        '''
+        """
         return instr.vex()
 
     def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
-        '''Return comments at the instruction'''
+        """Return comments at the instruction"""
         return None
 
     ############################################
@@ -391,147 +406,157 @@ class Disassembler(ABC):
     @classmethod
     @abstractmethod
     def is_installed(cls) -> bool:
-        '''Returns Boolean on whether or not the dissassembler is installed'''
+        """Returns Boolean on whether or not the dissassembler is installed"""
         raise NotImplementedError
 
     @classmethod
     @abstractmethod
-    def install(cls, version: Optional[str] = None, install_dir:Optional[str]=None, build:Optional[bool]=False, local_install_file:Optional[str]=None) -> str:
-        '''
+    def install(
+        cls,
+        version: Optional[str] = None,
+        install_dir: Optional[str] = None,
+        build: Optional[bool] = False,
+        local_install_file: Optional[str] = None,
+    ) -> str:
+        """
         Installs the disassembler to a user specified directory or within the python module if none is specified
         :param version: The release version or commit hash. If commit hash is provided build must be set True. Ignored if local_install_file is provided
         :param install_dir: The directory to install the disassembler too
         :param build: True if the disassembler should be built from source
         :param local_install_file: Path to the release file of the disassembler
         :returns: the directory the disassembler is installed to
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
     def analyze(self, path) -> bool:
-        '''
+        """
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: True on success, false otherwise
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_entry_point(self) -> int:
-        '''Returns the address of the entry point to the function'''
+        """Returns the address of the entry point to the function"""
         raise NotImplementedError
 
     @abstractmethod
     def get_architecture(self) -> str:
-        '''
+        """
         Returns the architecture of the binary.
         For best results use either archinfo, qemu, or compilation triplet naming conventions.
         https://github.com/angr/archinfo
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_endianness(self) -> Endian:
-        '''Returns an Enum representing the Endianness'''
+        """Returns an Enum representing the Endianness"""
         raise NotImplementedError
 
     @abstractmethod
     def get_bitness(self) -> int:
-        '''Returns the word size of the architecture (e.g., 16, 32, 64)'''
+        """Returns the word size of the architecture (e.g., 16, 32, 64)"""
         raise NotImplementedError
 
     @abstractmethod
     def get_base_address(self) -> int:
-        '''Returns the base address the binary is based at'''
+        """Returns the base address the binary is based at"""
         raise NotImplementedError
 
     @abstractmethod
     def get_dynamic_libs(self) -> Iterable[str]:
-        '''Returns the list of names of the dynamic libraries used in this binary'''
+        """Returns the list of names of the dynamic libraries used in this binary"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_iterator(self) -> Iterable[Any]:
-        '''
-        Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data) 
+        """
+        Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data)
         needed to construct a `Function` object for all functions in the binary.
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_func_addr(self, func_ctxt: Any) -> int:
-        '''Returns the address of the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Returns the address of the function corresponding to the function information returned from `get_func_iterator()`"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_name(self, addr: int, func_ctxt: Any) -> str:
-        '''Returns the name of the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Returns the name of the function corresponding to the function information returned from `get_func_iterator()`"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
-        '''Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
-        '''Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
-        '''Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`'''
+        """Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`"""
         raise NotImplementedError
 
     @abstractmethod
     def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
-        '''Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk'''
+        """Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
-        '''Return the address to functions that call func_ctxt'''
+        """Return the address to functions that call func_ctxt"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
-        '''Return the address to functions that are called in func_ctxt'''
+        """Return the address to functions that are called in func_ctxt"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
-        '''Returns an iterable of references within a function'''
+        """Returns an iterable of references within a function"""
         raise NotImplementedError
 
     @abstractmethod
     def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
-        '''
+        """
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
         needed to construct a `BasicBlock` object for all basic blocks in the function based on function information returned from `get_func_iterator()`.
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
-        '''
+        """
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def get_next_bbs(self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any) -> Iterable[Branch]:
-        '''
+    def get_next_bbs(
+        self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any
+    ) -> Iterable[Branch]:
+        """
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
-        '''
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def get_bb_instructions(self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any) -> List[Tuple[bytes, str]]:
-        '''
+    def get_bb_instructions(
+        self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any
+    ) -> List[Tuple[bytes, str]]:
+        """
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
-        '''
+        """
         raise NotImplementedError
