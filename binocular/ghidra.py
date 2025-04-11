@@ -137,24 +137,22 @@ class PipeRPC:
                 return b""
 
             self.connect()
-
         if self.proc is None:
             raise RuntimeError(
                 "Ghidra AnalyzeHeadless process was never set to RPC Pipe"
             )
 
-        if self.proc.poll is not None:
+        # Its ok if it dies if we are telling it to quit, otherwise not ok
+        if self.proc.poll() is not None and not cmd == PipeRPC.Command.QUIT:
             raise RuntimeError("Ghidra AnalyzeHeadless process is dead")
 
         id = cmd.value
         msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr, instr_addr)
-
         self.sock.sendall(msg)
         start = time.time()
         header = b""
         header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
-
         if res_id != id + 1:
             raise Exception(
                 f"Recieved unexpected response id: {res_id}, Expected: {id+1}"
@@ -428,15 +426,10 @@ class Ghidra(Disassembler):
         self,
         verbose: bool = True,
         project_path: Optional[str] = None,
-        ghidra_url: Optional[str] = None,
         home: Optional[str] = None,
         cpus: int = 1,
     ):
         super().__init__(verbose=verbose)
-
-        # TODO Make it work with ghidra server
-        # TODO unconfirmed this will work with a ghidra server
-        self.ghidra_url = ghidra_url
 
         if project_path is None:
             project_path = Ghidra.DEFAULT_PROJECT_PATH()
@@ -537,17 +530,14 @@ class Ghidra(Disassembler):
 
         # PROJECT SETUP
         cmd = [self._analyze_headless_path()]
-        if self.ghidra_url is not None:
-            cmd.append(self.ghidra_url)
-        else:
-            # Containing folder of the project is the same name of the project
-            # A little cleaner to handle when you can just rm the <md5sum>/ to
-            # delete a whole project if need be
-            self.project_location = os.path.join(self.base_project_path, md5hash)
-            self.project_name = md5hash
-            imported = os.path.exists(self.project_location)
-            os.makedirs(self.project_location, exist_ok=True)
-            cmd += [self.project_location, self.project_name]
+        # Containing folder of the project is the same name of the project
+        # A little cleaner to handle when you can just rm the <md5sum>/ to
+        # delete a whole project if need be
+        self.project_location = os.path.join(self.base_project_path, md5hash)
+        self.project_name = md5hash
+        imported = os.path.exists(self.project_location)
+        os.makedirs(self.project_location, exist_ok=True)
+        cmd += [self.project_location, self.project_name]
 
         self.rpc_pipe = PipeRPC(timeout=self.analysis_timeout(bin_size))
 
@@ -582,14 +572,28 @@ class Ghidra(Disassembler):
 
         start = time.time()
         timedout = False
+
+        if self.ghidra_proc.poll() is not None:
+            raise RuntimeError("Ghidra Analyzeheadless is not running")
+
+        timeout = self.analysis_timeout(bin_size)
+        logger.debug(f"Waiting at least {timeout}s for Analysis to finish")
         while (
-            timedout := (time.time() - start < self.analysis_timeout(bin_size))
+            timedout := (time.time() - start < timeout)
             and self.ghidra_proc.poll() is None
         ):
             if "Analysis succeeded for file" in self.stdout_monitor:
                 return True, None
-
             time.sleep(0.01)
+
+        if self.ghidra_proc.poll() is not None:
+            logger.debug("Ghidra Analyzeheadless died")
+            logger.debug(self.stdout_monitor.data)
+
+        if "Unable to lock project" in self.stdout_monitor:
+            logger.error(
+                f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}. Exiting"
+            )
 
         # Timed out. Kill self.ghidra_proc
         self.stdout_monitor.stop()

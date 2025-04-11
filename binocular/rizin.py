@@ -11,7 +11,7 @@ import tempfile
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import IO, Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import IO, Any, Union, Dict, List, Optional, Set, Tuple
 from urllib.request import urlopen
 
 import git
@@ -475,9 +475,12 @@ class Rizin(Disassembler):
             addr = i["offset"]
 
             self._pipe.cmd(f"s {addr}")
-            instr_data = self._pipe.cmdj(f"pdj 1")[0]
+            instr_data: Dict[str, Union[int, str]] = self._pipe.cmdj(f"pdj 1")[0]
 
-            instrs.append((bytes.fromhex(instr_data["bytes"]), instr_data["disasm"]))
+            instr_bytes = str(instr_data["bytes"])
+            disasm = str(instr_data.get("disasm", ""))
+
+            instrs.append((bytes.fromhex(instr_bytes), disasm))
 
         return instrs
 
@@ -494,7 +497,7 @@ class Rizin(Disassembler):
         instr_data = self._pipe.cmdj(f"pdj 1")[0]
         ir = instr_data.get("esil", None)
         if ir is not None and len(ir) > 0:
-            return IR(IL.ESIL, ir)
+            return IR(lang_name=IL.ESIL, data=ir)
 
         return None
 

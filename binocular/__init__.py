@@ -4,7 +4,10 @@ import coloredlogs  # type: ignore[import-untyped]
 
 logger = logging.getLogger("BINocular")
 logger.addHandler(logging.FileHandler("logs.txt"))
-coloredlogs.install(fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
+coloredlogs.install(
+    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s",
+    level=logging.INFO,
+)
 
 from .consts import IL, BranchType, Endian, IndirectToken
 from .disassembler import Backend, Disassembler
