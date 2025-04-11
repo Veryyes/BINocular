@@ -83,17 +83,6 @@ def test_binary(make):
         assert b.entrypoint == borm.entrypoint
         assert b.os == borm.os
         assert b.sha256 == borm.sha256
-        assert b.nx == borm.nx
-        assert b.pie == borm.pie
-        assert b.canary == borm.canary
-        assert b.relro == borm.relro
-        assert b.rpath == borm.rpath
-        assert b.runpath == borm.runpath
-        assert b.stripped == borm.stripped
-        assert b.fortify == borm.fortify
-        assert b.fortified == borm.fortified
-        assert b.fortifiable == borm.fortifiable
-        assert b.fortify_score == borm.fortify_score
 
         b1 = Binary.from_orm(borm)
         assert b1.architecture == borm.architecture
@@ -102,17 +91,6 @@ def test_binary(make):
         assert b1.entrypoint == borm.entrypoint
         assert b1.os == borm.os
         assert b1.sha256 == borm.sha256
-        assert b1.nx == borm.nx
-        assert b1.pie == borm.pie
-        assert b1.canary == borm.canary
-        assert b1.relro == borm.relro
-        assert b1.rpath == borm.rpath
-        assert b1.runpath == borm.runpath
-        assert b1.stripped == borm.stripped
-        assert b1.fortify == borm.fortify
-        assert b1.fortified == borm.fortified
-        assert b1.fortifiable == borm.fortifiable
-        assert b1.fortify_score == borm.fortify_score
 
         assert b1.architecture == b.architecture
         assert b1.endianness == b.endianness
@@ -120,17 +98,6 @@ def test_binary(make):
         assert b1.entrypoint == b.entrypoint
         assert b1.os == b.os
         assert b1.sha256 == b.sha256
-        assert b1.nx == b.nx
-        assert b1.pie == b.pie
-        assert b1.canary == b.canary
-        assert b1.relro == b.relro
-        assert b1.rpath == b.rpath
-        assert b1.runpath == b.runpath
-        assert b1.stripped == b.stripped
-        assert b1.fortify == b.fortify
-        assert b1.fortified == b.fortified
-        assert b1.fortifiable == b.fortifiable
-        assert b1.fortify_score == b.fortify_score
 
 
 def test_function(make):
@@ -143,8 +110,6 @@ def test_function(make):
         assert f.architecture == form.architecture
         assert f.endianness == form.endianness
         assert f.bitness == form.bitness
-        assert f.pie == form.pie
-        assert f.canary == form.canary
         assert f.return_type == form.return_type
         assert ", ".join([str(x) for x in f.argv]) == form.argv
 

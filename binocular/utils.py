@@ -3,7 +3,7 @@ from __future__ import annotations
 import posixpath
 import subprocess
 from collections import defaultdict
-from typing import Dict, List, Tuple, Type
+from typing import Dict, List, Tuple, Type, Optional
 from urllib.parse import unquote, urlsplit
 
 from archinfo import (
@@ -58,7 +58,7 @@ for a in arches:
 
 
 def run_proc(
-    cmd: List[str], timeout: int = 15, stdin=False, cwd="."
+    cmd: List[str], timeout: Optional[int] = 15, stdin=False, cwd="."
 ) -> Tuple[str, str]:
     if stdin:
         stdin = subprocess.PIPE

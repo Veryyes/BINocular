@@ -109,7 +109,7 @@ class Rizin(Disassembler):
 
             for cmd in cmds:
                 logger.info(f"$ {' '.join(cmd)}")
-                out, err = run_proc(cmd=cmd, cwd=install_dir)
+                out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
                 if len(out) > 0:
                     logger.info(f"[STDOUT] {out}")
                 if len(err) > 0:
