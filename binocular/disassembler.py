@@ -82,7 +82,7 @@ class Disassembler(ABC):
         self._bbs: Dict[int, BasicBlock] = dict()
         self._instrs: Dict[int, Instruction] = dict()
         self.binary: Optional[Binary] = None
-        self.functions: List[NativeFunction] = list()
+        self.functions: Set[NativeFunction] = set()
 
     def __enter__(self):
         return self.open()
@@ -94,7 +94,7 @@ class Disassembler(ABC):
         """Returns the Name of the Disassembler"""
         return self.__class__.__name__
 
-    def load(self, path):
+    def load(self, path, load_strings: bool = True):
         """
         Load a binary into the disassembler and trigger any default analysis
         :param path: The file path to binary to analyze
@@ -110,15 +110,22 @@ class Disassembler(ABC):
 
         start = time.time()
         self._pre_normalize(path)
-        self._create_binary()
+        self._create_binary(load_strings)
+        if self.binary is None:
+            raise Disassembler.FailedToLoadBinary(
+                "binary member was not set. Something went wrong."
+            )
         self._create_functions()
         self.binary.functions = self.functions
         for f in self.binary.functions:
+            if f.address is None:
+                raise Disassembler.FailedToLoadBinary("Function with no address")
             self.binary._function_lookup[f.address] = f
+
         self._post_normalize()
         logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
 
-    def _create_binary(self):
+    def _create_binary(self, load_strings: bool):
         start = time.time()
 
         self.binary = Binary(
@@ -134,7 +141,8 @@ class Disassembler(ABC):
         self.binary.set_path(self._binary_filepath)
 
         io_stream = self.binary.io()
-        self.binary.strings |= set(self.get_strings(io_stream, len(self.binary)))
+        if load_strings:
+            self.binary.strings |= set(self.get_strings(io_stream, len(self.binary)))
         io_stream.close()
 
         self.functions = set()
