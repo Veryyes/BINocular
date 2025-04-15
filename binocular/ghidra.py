@@ -222,6 +222,20 @@ class ProcMon(threading.Thread):
         self.running = False
 
 
+def gzf_project_name(gzf_path: str) -> Optional[str]:
+    if not os.path.exists(gzf_path):
+        return None
+
+    if not os.path.isfile(gzf_path):
+        return None
+
+    # Slightly Scuff. Subject to change if serialization format changes
+    with open(gzf_path, "rb") as f:
+        f.seek(0x12)
+        proj_name_len = struct.unpack(">H", f.read(2))[0]
+        return str(f.read(proj_name_len), "utf8")
+
+
 class Ghidra(Disassembler):
     GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
     GITHUB_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
@@ -437,6 +451,7 @@ class Ghidra(Disassembler):
         project_path: Optional[str] = None,
         home: Optional[str] = None,
         cpus: int = 1,
+        analysis_timeout: Optional[int] = None,
     ):
         super().__init__(verbose=verbose)
 
@@ -467,6 +482,7 @@ class Ghidra(Disassembler):
         self.rpc_pipe: Optional[PipeRPC] = None
         self.proc_monitor: Optional[ProcMon] = None
         self.bin_name: Optional[str] = None
+        self.anal_time: Optional[int] = analysis_timeout
 
     def _analyze_headless_path(self) -> str:
         return os.path.join(self.ghidra_home, "support", "analyzeHeadless")
@@ -538,6 +554,13 @@ class Ghidra(Disassembler):
         if self.bin_name is None:
             return False, f"Failed to resolve input binary from path: {path}"
 
+        if self.bin_name.endswith(".gzf"):
+            self.bin_name = gzf_project_name(path)
+
+        if self.bin_name is None:
+            return False, f"Failed to resolve input binary from path: {path}"
+
+        logger.info(f"Loading: {self.bin_name}")
         if not imported:
             cmd += ["-import", str(path)]
         else:
@@ -562,10 +585,16 @@ class Ghidra(Disassembler):
         if self.ghidra_proc.poll() is not None:
             raise RuntimeError("Ghidra Analyzeheadless is not running")
 
-        timeout = self.analysis_timeout(bin_size)
+        if self.anal_time is None:
+            timeout = self.analysis_timeout(bin_size)
+        elif self.anal_time <= 0:
+            timeout = None
+        else:
+            timeout = self.anal_time
+
         logger.debug(f"Waiting at least {timeout}s for Analysis to finish")
         while (
-            timedout := (time.time() - start < timeout)
+            timedout := (timeout is None or time.time() - start < timeout)
             and self.ghidra_proc.poll() is None
         ):
             if "Analysis succeeded for file" in self.proc_monitor:
@@ -580,7 +609,7 @@ class Ghidra(Disassembler):
             logger.error(
                 f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}. Exiting"
             )
-
+        print(self.proc_monitor.stdout)
         # Timed out. Kill self.ghidra_proc
         self.proc_monitor.stop()
         self.proc_monitor.join()
@@ -949,24 +978,35 @@ class Ghidra(Disassembler):
         )
 
     def run_script(
-        self, script: str, timeout: int, script_args: Optional[List[str]] = None
+        self,
+        script: str,
+        timeout: int,
+        script_args: Optional[List[str]] = None,
+        script_path: Optional[str] = None,
     ) -> Optional[str]:
         """Run a custom script"""
-        script_path = os.path.join(Ghidra.SCRIPT_PATH(), script)
-        if not os.path.exists(script_path):
+        curr_script_path = (
+            os.path.join(Ghidra.SCRIPT_PATH(), script)
+            if script_path is None
+            else os.path.join(os.path.realpath(script_path), script)
+        )
+        if not os.path.exists(curr_script_path):
             script = os.path.realpath(script)
-            logger.info(f"Creating Symlink: {script} -> {script_path}")
-            os.symlink(script, script_path)
+            logger.info(f"Creating Symlink: {script} -> {curr_script_path}")
+            os.symlink(script, curr_script_path)
 
-        if os.path.isdir(script_path):
+        if os.path.isdir(curr_script_path):
             return None
+
+        if self.bin_name is None:
+            raise RuntimeError("Binary Name is Unknown")
 
         cmd = [
             self._analyze_headless_path(),
             self.project_location,
             self.project_name,
             "-scriptPath",
-            Ghidra.SCRIPT_PATH(),
+            Ghidra.SCRIPT_PATH() if script_path is None else script_path,
             "-max-cpu",
             str(self.cpus),
             "-process",
