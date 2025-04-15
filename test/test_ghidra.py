@@ -130,3 +130,14 @@ def test_script(make):
         g.load("example")
         stdout = g.run_script("./ghidra_script.py", 10)
     assert "Ghidra Version:" in stdout
+
+
+def test_script_args(make):
+    assert Ghidra.is_installed()
+    with Ghidra() as g:
+        g.load("example")
+        script_args = ["ARRRGH", "BLEHH", "BIN OCULAR", '"X"']
+        stdout = g.run_script("./ghidra_script_args.py", 10, script_args=script_args)
+        print(stdout)
+        for a in script_args:
+            assert a in stdout

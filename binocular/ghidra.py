@@ -948,7 +948,9 @@ class Ghidra(Disassembler):
             "utf8",
         )
 
-    def run_script(self, script: str, timeout: int) -> Optional[str]:
+    def run_script(
+        self, script: str, timeout: int, script_args: Optional[List[str]] = None
+    ) -> Optional[str]:
         """Run a custom script"""
         script_path = os.path.join(Ghidra.SCRIPT_PATH(), script)
         if not os.path.exists(script_path):
@@ -965,13 +967,16 @@ class Ghidra(Disassembler):
             self.project_name,
             "-scriptPath",
             Ghidra.SCRIPT_PATH(),
-            "-postScript",
-            script,
             "-max-cpu",
             str(self.cpus),
             "-process",
             self.bin_name,
+            "-postScript",
+            script,
         ]
+
+        if script_args is not None:
+            cmd += script_args
 
         if self.verbose:
             logger.info("$ " + " ".join(cmd))
