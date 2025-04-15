@@ -411,6 +411,10 @@ class Disassembler(ABC):
         """Return comments at the instruction"""
         return None
 
+    def run_script(self, script: str, timeout: int) -> Optional[str]:
+        """Run a custom script"""
+        return None
+
     ############################################
     # REQUIRED DISASSEMBLER DEFINED OPERATIONS #
     ############################################

@@ -114,7 +114,7 @@ def test_function(make):
         assert ", ".join([str(x) for x in f.argv]) == form.argv
 
         f = g.function_sym("main")
-        print(f.calls_addrs)
+        # print(f.calls_addrs)
         assert g.function_sym("foo") in [x for x in f.calls]
         assert g.function_sym("fib") in [x for x in f.calls]
 
@@ -122,3 +122,11 @@ def test_function(make):
         f = g.function_sym("fib")
         assert f in [x for x in f.callers]
         assert f in [x for x in f.calls]
+
+
+def test_script(make):
+    assert Ghidra.is_installed()
+    with Ghidra() as g:
+        g.load("example")
+        stdout = g.run_script("./ghidra_script.py", 10)
+    assert "Ghidra Version:" in stdout

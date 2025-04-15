@@ -181,18 +181,18 @@ class PipeRPC:
         return data
 
 
-# TODO monitor for ERROR REPORT SCRIPT ERROR
-class StdoutMonitor(threading.Thread):
+class ProcMon(threading.Thread):
     def __init__(self, chunk_len: int = 2048, verbose: bool = False):
         super().__init__()
         self.proc: Optional[subprocess.Popen] = None
         self.verbose: bool = verbose
         self.running: bool = False
-        self.data: str = ""
+        self.stdout: str = ""
+        self.stderr: str = ""
         self.chunk_len: int = chunk_len
 
     def __contains__(self, x: str):
-        return x in self.data
+        return x in self.stdout
 
     def run(self):
         if self.proc is None:
@@ -200,14 +200,23 @@ class StdoutMonitor(threading.Thread):
 
         self.running = True
         while self.running and self.proc.poll() is None:
-            raw = self.proc.stdout.read1(self.chunk_len)
-            if raw is None:
+            out = self.proc.stdout.read1(self.chunk_len)
+            # err = self.proc.stderr.read1(self.chunk_len)
+            # print('err')
+            if out is None:  # and err is None:
                 time.sleep(1)
             else:
-                data = str(raw, "utf8")
-                self.data += data
+                if out:
+                    self.stdout += str(out, "utf8")
+                # if err:
+                #     self.stderr += str(err, "utf8")
 
             time.sleep(0.250)
+        # self.stderr = str(self.proc.stderr.read(), 'utf8')
+
+        out = self.proc.stdout.read()
+        if out:
+            self.stdout += str(out, "utf8")
 
     def stop(self) -> None:
         self.running = False
@@ -456,7 +465,8 @@ class Ghidra(Disassembler):
         self.cpus: int = cpus
         self.ghidra_proc: Optional[subprocess.Popen] = None
         self.rpc_pipe: Optional[PipeRPC] = None
-        self.stdout_monitor: Optional[StdoutMonitor] = None
+        self.proc_monitor: Optional[ProcMon] = None
+        self.bin_name: Optional[str] = None
 
     def _analyze_headless_path(self) -> str:
         return os.path.join(self.ghidra_home, "support", "analyzeHeadless")
@@ -470,37 +480,8 @@ class Ghidra(Disassembler):
 
     def clear(self):
         super().clear()
-        if self.ghidra_proc is None:
-            return
-
-        if self.stdout_monitor is None:
-            return
-
-        if "ERROR REPORT SCRIPT ERROR" in self.stdout_monitor:
-            logger.info("Ghidra Analyze Headless Errored")
-
-        self.stdout_monitor.stop()
-        self.stdout_monitor.join()
-
-        logger.info("Closing RPC Pipe...")
-        try:
-            self.rpc_pipe.request(PipeRPC.Command.QUIT)
-        except TimeoutError:
-            logger.warn("Encountered Timeout on PipeRPC graceful quit")
-
-        self.rpc_pipe.close()
-        logger.info("Waiting on Ghidra to exit...")
-        try:
-            self.ghidra_proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._kill_headless()
-
-        exit_code = self.ghidra_proc.poll()
-        if exit_code is not None:
-            logger.info(f"Ghidra Process has exited: {exit_code}")
-            self.ghidra_proc = None
-        else:
-            raise RuntimeError("Unable to Close Ghidra Analyze Headless")
+        self.bin_name = None
+        self._close_rpc()
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s +
@@ -552,10 +533,15 @@ class Ghidra(Disassembler):
             "-max-cpu",
             str(self.cpus),
         ]
+
+        self.bin_name = os.path.basename(path)
+        if self.bin_name is None:
+            return False, f"Failed to resolve input binary from path: {path}"
+
         if not imported:
             cmd += ["-import", str(path)]
         else:
-            cmd += ["-process", os.path.basename(path)]
+            cmd += ["-process", self.bin_name]
 
         if self.verbose:
             logger.info("$ " + " ".join(cmd))
@@ -566,9 +552,9 @@ class Ghidra(Disassembler):
 
         self.rpc_pipe.proc = self.ghidra_proc
 
-        self.stdout_monitor = StdoutMonitor(verbose=self.verbose)
-        self.stdout_monitor.proc = self.ghidra_proc
-        self.stdout_monitor.start()
+        self.proc_monitor = ProcMon(verbose=self.verbose)
+        self.proc_monitor.proc = self.ghidra_proc
+        self.proc_monitor.start()
 
         start = time.time()
         timedout = False
@@ -582,22 +568,22 @@ class Ghidra(Disassembler):
             timedout := (time.time() - start < timeout)
             and self.ghidra_proc.poll() is None
         ):
-            if "Analysis succeeded for file" in self.stdout_monitor:
+            if "Analysis succeeded for file" in self.proc_monitor:
                 return True, None
             time.sleep(0.01)
 
         if self.ghidra_proc.poll() is not None:
             logger.debug("Ghidra Analyzeheadless died")
-            logger.debug(self.stdout_monitor.data)
+            logger.debug(self.proc_monitor.stdout)
 
-        if "Unable to lock project" in self.stdout_monitor:
+        if "Unable to lock project" in self.proc_monitor:
             logger.error(
                 f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}. Exiting"
             )
 
         # Timed out. Kill self.ghidra_proc
-        self.stdout_monitor.stop()
-        self.stdout_monitor.join()
+        self.proc_monitor.stop()
+        self.proc_monitor.join()
         self._kill_headless()
         return False, "Analyze Headless Timedout"
 
@@ -612,6 +598,46 @@ class Ghidra(Disassembler):
             count += 1
 
         return self.ghidra_proc.poll() is not None
+
+    def _post_normalize(self):
+        self._close_rpc()
+
+    def _close_rpc(self):
+        # Analysis Done. Close AnalyzeHeadless Process
+
+        if self.ghidra_proc is None:
+            return
+
+        if self.proc_monitor is None:
+            return
+
+        if "ERROR REPORT SCRIPT ERROR" in self.proc_monitor:
+            logger.info("Ghidra Analyze Headless Errored")
+
+        self.proc_monitor.stop()
+        self.proc_monitor.join(timeout=1)
+        self.proc_monitor = None
+
+        logger.info("Closing RPC Pipe...")
+        try:
+            self.rpc_pipe.request(PipeRPC.Command.QUIT)
+        except TimeoutError:
+            logger.warn("Encountered Timeout on PipeRPC graceful quit")
+
+        self.rpc_pipe.close()
+        logger.info("Waiting on Ghidra to exit...")
+        try:
+            self.ghidra_proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning("Timeout. Killing Ghidra Process")
+            self._kill_headless()
+
+        exit_code = self.ghidra_proc.poll()
+        if exit_code is not None:
+            logger.info(f"Ghidra Process has exited: {exit_code}")
+            self.ghidra_proc = None
+        else:
+            raise RuntimeError("Unable to Close Ghidra Analyze Headless")
 
     @staticmethod
     def _unpack_str_list(raw: bytes) -> List[str]:
@@ -921,3 +947,72 @@ class Ghidra(Disassembler):
             self.rpc_pipe.request(PipeRPC.Command.INSTR_COMMENT, instr_addr=instr_addr),
             "utf8",
         )
+
+    def run_script(self, script: str, timeout: int) -> Optional[str]:
+        """Run a custom script"""
+        script_path = os.path.join(Ghidra.SCRIPT_PATH(), script)
+        if not os.path.exists(script_path):
+            script = os.path.realpath(script)
+            logger.info(f"Creating Symlink: {script} -> {script_path}")
+            os.symlink(script, script_path)
+
+        if os.path.isdir(script_path):
+            return None
+
+        cmd = [
+            self._analyze_headless_path(),
+            self.project_location,
+            self.project_name,
+            "-scriptPath",
+            Ghidra.SCRIPT_PATH(),
+            "-postScript",
+            script,
+            "-max-cpu",
+            str(self.cpus),
+            "-process",
+            self.bin_name,
+        ]
+
+        if self.verbose:
+            logger.info("$ " + " ".join(cmd))
+
+        # script proc
+        script_proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        script_monitor = ProcMon(verbose=self.verbose)
+        script_monitor.proc = script_proc
+        script_monitor.start()
+
+        try:
+            start = time.time()
+
+            while time.time() - start < timeout and script_proc.poll() is None:
+                if "Unable to lock project" in script_monitor:
+                    logger.error(
+                        f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}"
+                    )
+                    script_proc.terminate()
+                    script_monitor.stop()
+                    script_monitor.join()
+                    return script_monitor.stdout
+
+                # TODO if we want a early exit or something
+                # if Sentinal in self.stdout_monitor:
+                #     return True, None
+                time.sleep(0.1)
+
+        finally:
+            # Ensure we clean up processes
+
+            if script_proc.poll() is None:
+                logger.debug("Analyze Headless has timed out and will be killed")
+                script_proc.terminate()
+                logger.debug(script_monitor.stdout)
+
+            script_monitor.stop()
+            script_monitor.join(5)
+            stdout = script_monitor.stdout
+
+        return stdout
