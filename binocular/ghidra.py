@@ -83,12 +83,9 @@ class PipeRPC:
     RESFMT = "!BI"
     RESFMT_SIZE = struct.calcsize(RESFMT)
 
-    def __init__(
-        self, gscript_ip: str = "127.0.0.1", port: int = 7331, timeout: int = 30
-    ):
-        self.gscript_ip: str = gscript_ip
-        self.port: int = port
-        self.sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    def __init__(self, unix_socket: str, timeout: int = 30):
+        self.unix_socket: str = unix_socket
+        self.sock: socket.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.is_connected: bool = False
         self.timeout: int = timeout
         self.proc: Optional[subprocess.Popen] = None
@@ -99,14 +96,14 @@ class PipeRPC:
             return False
 
         assert self.proc.poll() == None
-        logger.info(f"Attempting to Connect to: {self.gscript_ip}:{self.port}")
+        logger.info(f"Attempting to Connect to: {self.unix_socket}")
         waited = 0.0
         while not self.is_connected:
             try:
-                self.sock.connect((self.gscript_ip, self.port))
+                self.sock.connect(self.unix_socket)
                 self.is_connected = True
                 logger.info(
-                    f"Socket Connect to BINocular Ghidra Script {self.gscript_ip}:{self.port}"
+                    f"Socket Connect to BINocular Ghidra Script: {self.unix_socket}"
                 )
                 return True
             except ConnectionRefusedError:
@@ -146,25 +143,28 @@ class PipeRPC:
         if self.proc.poll() is not None and not cmd == PipeRPC.Command.QUIT:
             raise RuntimeError("Ghidra AnalyzeHeadless process is dead")
 
+        logger.debug(f"Sending Request: {cmd.name}")
+
         id = cmd.value
         msg = struct.pack(PipeRPC.REQFMT, id, bb_addr, f_addr, instr_addr)
         self.sock.sendall(msg)
         start = time.time()
         header = b""
         header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
+        # logger.debug(f"Received Bytes: {header}")
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
         if res_id != id + 1:
             raise Exception(
-                f"Recieved unexpected response id: {res_id}, Expected: {id+1}"
+                f"Receive unexpected response id: {res_id}, Expected: {id+1}"
             )
 
         if size < 0:
-            raise Exception(f"Recieved negative lengthed response")
+            raise Exception(f"Receive negative lengthed response")
 
         if size > 0:
             res = self._recv_bytes(self.sock, size, timeout=self.timeout)
             logger.debug(
-                f"Recieved {PipeRPC.Command(res_id-1).name} Response in {time.time()-start:2f}s"
+                f"Receive {PipeRPC.Command(res_id-1).name} Response in {time.time()-start:2f}s"
             )
             return res
 
@@ -479,6 +479,7 @@ class Ghidra(Disassembler):
 
         self.cpus: int = cpus
         self.ghidra_proc: Optional[subprocess.Popen] = None
+        self.unix_socket: str = os.path.join("/tmp", f"binocular_ghidra_{os.getpid()}")
         self.rpc_pipe: Optional[PipeRPC] = None
         self.proc_monitor: Optional[ProcMon] = None
         self.bin_name: Optional[str] = None
@@ -536,7 +537,9 @@ class Ghidra(Disassembler):
         os.makedirs(self.project_location, exist_ok=True)
         cmd += [self.project_location, self.project_name]
 
-        self.rpc_pipe = PipeRPC(timeout=self.analysis_timeout(bin_size))
+        self.rpc_pipe = PipeRPC(
+            self.unix_socket, timeout=self.analysis_timeout(bin_size)
+        )
 
         # Run the BinocularPipe Script
         cmd += [
@@ -544,8 +547,7 @@ class Ghidra(Disassembler):
             Ghidra.SCRIPT_PATH(),
             "-postScript",
             "BinocularPipe.java",
-            self.rpc_pipe.gscript_ip,
-            str(self.rpc_pipe.port),
+            self.unix_socket,
             "-max-cpu",
             str(self.cpus),
         ]
@@ -597,7 +599,7 @@ class Ghidra(Disassembler):
             timedout := (timeout is None or time.time() - start < timeout)
             and self.ghidra_proc.poll() is None
         ):
-            if "Analysis succeeded for file" in self.proc_monitor:
+            if "BINocularPipe Ready" in self.proc_monitor:
                 return True, None
             time.sleep(0.01)
 
@@ -609,11 +611,12 @@ class Ghidra(Disassembler):
             logger.error(
                 f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}. Exiting"
             )
-        print(self.proc_monitor.stdout)
+
         # Timed out. Kill self.ghidra_proc
         self.proc_monitor.stop()
         self.proc_monitor.join()
         self._kill_headless()
+        print(self.proc_monitor.stdout)
         return False, "Analyze Headless Timedout"
 
     def _kill_headless(self):
