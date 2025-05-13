@@ -415,7 +415,10 @@ class BasicBlock(NativeCode):
         elif isinstance(x, int):
             if self.address is None:
                 raise RuntimeError("BasicBlock has no address")
-            return x >= self.address and x <= (self.address + len(self))
+            end = self.end()
+            if end is None:
+                raise RuntimeError("Unreachable Code")
+            return x >= self.address and x <= end
         raise TypeError
 
     def __bytes__(self):
@@ -423,6 +426,18 @@ class BasicBlock(NativeCode):
         for instr in self.instructions:
             b += instr.data
         return b
+
+    def __str__(self) -> str:
+        addr = "N/A" if self.address is None else hex(self.address)
+        return f"<BasicBlock addr={addr}>"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def end(self) -> Optional[int]:
+        if self.address is None:
+            return None
+        return self.address + len(self)
 
     def set_function(self, func: NativeFunction):
         self._function = func
@@ -555,6 +570,13 @@ class NativeFunction(NativeCode):
             return any([x in bb for bb in self.basic_blocks])
         raise TypeError
 
+    def __str__(self) -> str:
+        addr = "N/A" if self.address is None else hex(self.address)
+        return f"<Function {self.name}({','.join([str(arg) for arg in self.argv])}) address={addr}>"
+
+    def __repr__(self) -> str:
+        return str(self)
+
     def __bytes__(self):
         """Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
@@ -572,6 +594,12 @@ class NativeFunction(NativeCode):
 
     def end(self):
         return [self._block_lookup[e] for e in self.end_block_addrs]
+
+    @property
+    def name(self) -> str:
+        if self.names is None:
+            return "N/A"
+        return self.names[0]
 
     @property
     def calls(self):
@@ -596,15 +624,15 @@ class NativeFunction(NativeCode):
                 yield f
 
     @cached_property
-    def cfg(self) -> nx.MultiDiGraph:
+    def cfg(self) -> nx.DiGraph:
         """Control Flow Graph of the Function"""
 
-        cfg: nx.MultiDiGraph = nx.MultiDiGraph()
+        cfg: nx.DiGraph = nx.DiGraph()
         self._cfg(set(), cfg, self.start())
 
         return cfg
 
-    def _cfg(self, history, g, bb: BasicBlock):
+    def _cfg(self, history: Set[BasicBlock], g: nx.DiGraph, bb: BasicBlock):
         if bb in history:
             return
 
@@ -612,7 +640,7 @@ class NativeFunction(NativeCode):
         g.add_node(bb)
 
         for btype, dest in bb:
-            if dest not in self._block_lookup:
+            if dest.address not in self._block_lookup:
                 continue
 
             g.add_node(dest)
@@ -1061,17 +1089,18 @@ class Binary(NativeCode):
         self._path = path
 
     @cached_property
-    def call_graph(self) -> nx.MultiDiGraph:
+    def call_graph(self) -> nx.DiGraph:
         """Function Call Graph"""
-        g: nx.MultiDiGraph = nx.MultiDiGraph()
+        g: nx.DiGraph = nx.DiGraph()
         for f in self.functions:
             g.add_node(f)
             for child_f in f.calls:
                 g.add_node(child_f)
                 g.add_edge(f, child_f)
+
             for parent_f in f.callers:
                 g.add_node(parent_f)
-                g.add_edge(f, parent_f)
+                g.add_edge(parent_f, f)
         return g
 
     @computed_field(repr=False)  # type: ignore[misc]

@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import bisect
 import os
 import string
 import time
@@ -77,9 +77,14 @@ class Disassembler(ABC):
         self.verbose: bool = verbose
 
         self._bb_count: int = 0
+        # maps function names to function objects
         self._func_names: Dict[str, NativeFunction] = dict()
+        # maps function addresses to function objects
         self._func_addrs: Dict[int, NativeFunction] = dict()
+        # list of function addresses sorted ascending
+        self._func_sorted: List[int] = list()
         self._bbs: Dict[int, BasicBlock] = dict()
+        self._bbs_sorted: List[int] = list()
         self._instrs: Dict[int, Instruction] = dict()
         self.binary: Optional[Binary] = None
         self.functions: Set[NativeFunction] = set()
@@ -122,6 +127,11 @@ class Disassembler(ABC):
                 raise Disassembler.FailedToLoadBinary("Function with no address")
             self.binary._function_lookup[f.address] = f
 
+        self._func_sorted = list(self._func_addrs)
+        self._func_sorted.sort()
+        self._bbs_sorted = list(self._bbs)
+        self._bbs_sorted.sort()
+
         self._post_normalize()
         logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
 
@@ -154,7 +164,7 @@ class Disassembler(ABC):
         for func_ctxt in self.get_func_iterator():
             addr = self.get_func_addr(func_ctxt)
             func_name = self.get_func_name(addr, func_ctxt)
-            logger.info(f"Processing Function: {func_name}")
+            logger.debug(f"Processing Function: {func_name}")
             f = NativeFunction(
                 endianness=self.binary.endianness,
                 architecture=self.binary.architecture,
@@ -225,14 +235,6 @@ class Disassembler(ABC):
             f.calls_addrs = set()
             for callee_addr in self.get_func_callees(addr, func_ctxt):
                 f.calls_addrs.add(callee_addr)
-
-        # run_time = time.time() - start
-        # logger.info(f"[{self.name()}] {self._bb_count} Basic Blocks Loaded")
-
-        # logger.info(f"[{self.name()}] {count} Functions Loaded")
-        # logger.info(f"[{self.name()}] Function Data Loaded: {run_time:.2f}s")
-        # logger.info(
-        #     f"[{self.name()}] Ave Function Load Time: {run_time/count:.2f}s")
 
     def _create_basicblocks(
         self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]
@@ -313,6 +315,40 @@ class Disassembler(ABC):
         """Returns the instruction at the given address"""
         return self._instrs.get(address, None)
 
+    def function_containing(self, address: int) -> Optional[NativeFunction]:
+        """Return the function which contains the given address"""
+        idx = bisect.bisect_left(self._func_sorted, address)
+        if idx >= len(self._func_sorted):
+            return self._func_addrs[self._func_sorted[-1]]
+        if self._func_sorted[idx] == address:
+            return self._func_addrs[self._func_sorted[idx]]
+
+        idx -= 1
+        if idx < 0:
+            return None
+
+        return self._func_addrs[self._func_sorted[idx]]
+
+    def bb_containing(self, address: int) -> Optional[BasicBlock]:
+        """Return the basicblock containing the given address"""
+        idx = bisect.bisect_left(self._bbs_sorted, address)
+
+        if idx >= len(self._bbs_sorted):
+            bb = self._bbs[self._bbs_sorted[-1]]
+        elif self._bbs_sorted[idx] == address:
+            bb = self._bbs[self._bbs_sorted[idx]]
+        else:
+            idx -= 1
+            if idx < 0:
+                return None
+
+            bb = self._bbs[self._bbs_sorted[idx]]
+
+        if address in bb:
+            return bb
+
+        return None
+
     ############################################
     # OPTIONAL DISASSEMBLER DEFINED OPERATIONS #
     ############################################
@@ -352,7 +388,9 @@ class Disassembler(ABC):
         self._bb_count = 0
         self._func_names.clear()
         self._func_addrs.clear()
+        self._func_sorted.clear()
         self._bbs.clear()
+        self._bbs_sorted.clear()
         self._instrs.clear()
         self.binary = None
         self.functions.clear()

@@ -168,6 +168,8 @@ class PipeRPC:
             )
             return res
 
+        logger.debug(f"Empty Response to: {cmd.name}")
+
         return b""
 
     def _recv_bytes(self, sock: socket.socket, size: int, timeout: int):
@@ -502,8 +504,8 @@ class Ghidra(Disassembler):
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s +
-        # 1 minutes per 500KB
-        return round(30 + 60 * (bin_size / (1024)) ** 2)
+        # 1 minutes per 100KB
+        return round(30 + 60 * (bin_size / (1024)))
 
     def analyze(self, path) -> Tuple[bool, Optional[str]]:
         """
@@ -1032,7 +1034,7 @@ class Ghidra(Disassembler):
         script_monitor = ProcMon(verbose=self.verbose)
         script_monitor.proc = script_proc
         script_monitor.start()
-
+        idx = 0
         try:
             start = time.time()
 
@@ -1045,6 +1047,11 @@ class Ghidra(Disassembler):
                     script_monitor.stop()
                     script_monitor.join()
                     return script_monitor.stdout
+
+                # log out stdout as it runs
+                nl_idx = script_monitor.stdout[idx:].rfind("\n")
+                if nl_idx >= 0:
+                    idx = nl_idx
 
                 # TODO if we want a early exit or something
                 # if Sentinal in self.stdout_monitor:

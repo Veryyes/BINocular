@@ -6,7 +6,7 @@ logger = logging.getLogger("BINocular")
 coloredlogs.install(
     logger=logger,
     fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s",
-    level=logging.INFO,
+    level=logging.DEBUG,
 )
 
 from .consts import IL, BranchType, Endian, IndirectToken
