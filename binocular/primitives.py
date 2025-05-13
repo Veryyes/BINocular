@@ -7,7 +7,7 @@ import tempfile
 from collections import defaultdict
 from functools import cached_property
 from pathlib import Path
-from typing import IO, Any, Dict, List, Optional, Set, Type, Union
+from typing import IO, Any, Dict, List, Optional, Set, Type, Union, Tuple
 
 import networkx as nx
 import pyvex
@@ -375,7 +375,7 @@ class BasicBlock(NativeCode):
         def __iter__(self):
             return self
 
-        def __next__(self):
+        def __next__(self) -> Tuple[BranchType, Union[IndirectToken, int, BasicBlock]]:
             if self.idx >= len(self.blocks):
                 raise StopIteration
 
@@ -384,6 +384,7 @@ class BasicBlock(NativeCode):
             addr = branch_data.target
 
             target_bb = self.block_cache.get(addr, None)
+            dest: Union[IndirectToken, int, BasicBlock]
             if addr is None:
                 # Statically Unknown Branch Location (e.g. indirect jump)
                 dest = IndirectToken()
@@ -640,7 +641,15 @@ class NativeFunction(NativeCode):
         g.add_node(bb)
 
         for btype, dest in bb:
-            if dest.address not in self._block_lookup:
+            if isinstance(dest, IndirectToken):
+                continue
+
+            if isinstance(dest, BasicBlock):
+                branch_addr = dest.address
+            else:
+                branch_addr = dest
+
+            if branch_addr not in self._block_lookup:
                 continue
 
             g.add_node(dest)

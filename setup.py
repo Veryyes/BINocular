@@ -8,7 +8,8 @@ setup(
     packages=["binocular"],
     install_requires=[
         "rich",
-        "typer",
+        "click<8.2.0",
+        "typer==0.15.2",
         "pydantic",
         "networkx",
         "SQLAlchemy",
