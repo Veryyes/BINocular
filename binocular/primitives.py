@@ -629,34 +629,36 @@ class NativeFunction(NativeCode):
         """Control Flow Graph of the Function"""
 
         cfg: nx.DiGraph = nx.DiGraph()
-        self._cfg(set(), cfg, self.start())
+        history: Set[BasicBlock] = set()
+        bbs_to_explore: List[BasicBlock] = [self.start()]
+
+        while len(bbs_to_explore) > 0:
+            curr = bbs_to_explore.pop()
+            if curr in history:
+                continue
+
+            history.add(curr)
+            cfg.add_node(curr)
+
+            for btype, dest in curr:
+                if isinstance(dest, IndirectToken):
+                    continue
+
+                if isinstance(dest, BasicBlock):
+                    branch_addr = dest.address
+                else:
+                    branch_addr = dest
+
+                if branch_addr not in self._block_lookup:
+                    continue
+
+                cfg.add_node(dest)
+                cfg.add_edge(curr, dest, branch=btype)
+
+                if isinstance(dest, BasicBlock):
+                    bbs_to_explore.append(dest)
 
         return cfg
-
-    def _cfg(self, history: Set[BasicBlock], g: nx.DiGraph, bb: BasicBlock):
-        if bb in history:
-            return
-
-        history.add(bb)
-        g.add_node(bb)
-
-        for btype, dest in bb:
-            if isinstance(dest, IndirectToken):
-                continue
-
-            if isinstance(dest, BasicBlock):
-                branch_addr = dest.address
-            else:
-                branch_addr = dest
-
-            if branch_addr not in self._block_lookup:
-                continue
-
-            g.add_node(dest)
-            g.add_edge(bb, dest, branch=btype)
-
-            if isinstance(dest, BasicBlock):
-                self._cfg(history, g, dest)
 
     @cached_property
     def xrefs(self) -> Set[Reference]:

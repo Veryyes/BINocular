@@ -39,6 +39,8 @@ def find_type(root: tree_sitter.Node, type: str, all: bool = False):
 
 
 def get_child_by_type(root: tree_sitter.Node, *types):
+    if root is None:
+        return None
     for child in root.children:
         if child.type in types:
             return child
@@ -115,6 +117,8 @@ class C_Code:
                 next_n, _ = unwind_ptr(next_n)
 
             id_node = traverse(next_n, "function_declarator", "identifier")
+            if id_node is None:
+                return None
             return str(id_node.text, encoding=encoding)
 
     @staticmethod
