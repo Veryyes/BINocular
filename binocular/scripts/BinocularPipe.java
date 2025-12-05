@@ -1,21 +1,23 @@
 //@category BINocular
 
-import java.net.ServerSocket;
-import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.net.StandardProtocolFamily;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.nio.file.Paths;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.io.IOException;
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import ghidra.app.script.GhidraScript;
 
@@ -154,8 +156,10 @@ public class BinocularPipe extends GhidraScript{
     @Override
     public void run() throws Exception{
         String[] args = this.getScriptArgs();
-        String ip = args[0];
-        int port = Integer.parseInt(args[1]);
+        String unixSocket = args[0];
+        Path socketPath = Path.of(unixSocket);
+        Files.deleteIfExists(socketPath);
+        UnixDomainSocketAddress unixAddress = UnixDomainSocketAddress.of(socketPath);
 
         this.st = currentProgram.getSymbolTable();
         this.fm = currentProgram.getFunctionManager();
@@ -168,51 +172,49 @@ public class BinocularPipe extends GhidraScript{
         decomp.openProgram(currentProgram);
 
         boolean running = true;
-        try (ServerSocket server = new ServerSocket(port)){
-            Socket client = server.accept();
-            BufferedInputStream in = new BufferedInputStream(client.getInputStream());
-            BufferedOutputStream out = new BufferedOutputStream(client.getOutputStream());
+        try (ServerSocketChannel server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)){
+            server.bind(unixAddress);
+            this.println("BINocularPipe Ready");
+            SocketChannel client = server.accept();
             try{
                 while (running){
-                    running = this.handleClient(in, out);
+                    running = this.handleClient(client);
                 }
             }catch(IOException e){
                 running = false;
-                System.out.println("IOException has occurred handling a client: " + e.toString());
+                this.println("IOException has occurred handling a client: " + e.toString());
             }finally{
-                in.close();
-                out.close();
+                this.println("Closing BINocular Pipe");
                 client.close();
+                Files.deleteIfExists(socketPath);
             }
-            
         }
+        this.println("BINocular Pipe Closed");
     }
 
-    private boolean handleClient(BufferedInputStream in, BufferedOutputStream out) throws IOException{
+    private boolean handleClient(SocketChannel client) throws IOException{
         int id;
         long bbAddr = 0;
         long funcAddr = 0;
         long instrAddr = 0;
-        byte[] buff = new byte[8];
+        ByteBuffer res = ByteBuffer.allocate(25);
         byte[] response;
         int res_size = 0;
+        int out_size = 0;
         boolean running = true;
 
-        id = in.read();
+        while(res_size < 25) {
+            res_size += client.read(res);
+        }
+
+        id = (int) res.get(0);
         if (id == QUIT){
             running = false;
         }
 
-
-        in.read(buff, 0, 8);
-        bbAddr = ByteBuffer.wrap(buff).getLong();
-
-        in.read(buff, 0, 8);
-        funcAddr = ByteBuffer.wrap(buff).getLong();
-
-        in.read(buff, 0, 8);
-        instrAddr = ByteBuffer.wrap(buff).getLong();
-    
+        bbAddr = res.getLong(1);
+        funcAddr = res.getLong(9);
+        instrAddr = res.getLong(17);
 
         boolean error = false;
         try{
@@ -227,15 +229,15 @@ public class BinocularPipe extends GhidraScript{
             resType = (byte)(id + 1);
         }
 
-        byte[] raw = this.basicPack(resType, response);
+        ByteBuffer raw = this.basicPack(resType, response);
+        // seek to the beginning
+        raw.position(0);
+        out_size = client.write(raw);
 
-        out.write(raw, 0, raw.length);
-        out.flush();
-        
         return running;
     }
 
-    private byte[] basicPack(byte type, byte[] data){
+    private ByteBuffer basicPack(byte type, byte[] data){
         int size = 0;
         if (data != null)
             size = data.length;
@@ -248,7 +250,7 @@ public class BinocularPipe extends GhidraScript{
         if (size > 0)
             out.put(data);
 
-        return out.array();
+        return out;
     }
 
     private byte[] handleCommand(int id, long bbAddr, long funcAddr, long instrAddr) throws CancelledException{
@@ -333,6 +335,7 @@ public class BinocularPipe extends GhidraScript{
             case SECTIONS:
                 return this.packSection(this.getSections());
             default:
+                this.println("Bad Request ID: "+ id);
                 return null;
         }
     }
@@ -412,8 +415,6 @@ public class BinocularPipe extends GhidraScript{
         ByteBuffer buf = ByteBuffer.allocate(8 * list.size());
         buf.order(ByteOrder.BIG_ENDIAN);
         for (Function f: list){
-            // System.out.println(f.getEntryPoint().getOffset());
-            // System.out.printf("%02X ", f.getEntryPoint().getOffset());
             buf.putLong(f.getEntryPoint().getOffset());
         }
         return buf.array();

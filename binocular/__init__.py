@@ -3,10 +3,10 @@ import logging
 import coloredlogs  # type: ignore[import-untyped]
 
 logger = logging.getLogger("BINocular")
-logger.addHandler(logging.FileHandler("logs.txt"))
 coloredlogs.install(
+    logger=logger,
     fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s",
-    level=logging.INFO,
+    level=logging.DEBUG,
 )
 
 from .consts import IL, BranchType, Endian, IndirectToken

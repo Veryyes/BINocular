@@ -138,6 +138,5 @@ def test_script_args(make):
         g.load("example")
         script_args = ["ARRRGH", "BLEHH", "BIN OCULAR", '"X"']
         stdout = g.run_script("./ghidra_script_args.py", 10, script_args=script_args)
-        print(stdout)
         for a in script_args:
             assert a in stdout

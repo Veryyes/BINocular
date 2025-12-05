@@ -7,7 +7,7 @@ import tempfile
 from collections import defaultdict
 from functools import cached_property
 from pathlib import Path
-from typing import IO, Any, Dict, List, Optional, Set, Type, Union
+from typing import IO, Any, Dict, List, Optional, Set, Type, Union, Tuple
 
 import networkx as nx
 import pyvex
@@ -375,7 +375,7 @@ class BasicBlock(NativeCode):
         def __iter__(self):
             return self
 
-        def __next__(self):
+        def __next__(self) -> Tuple[BranchType, Union[IndirectToken, int, BasicBlock]]:
             if self.idx >= len(self.blocks):
                 raise StopIteration
 
@@ -384,6 +384,7 @@ class BasicBlock(NativeCode):
             addr = branch_data.target
 
             target_bb = self.block_cache.get(addr, None)
+            dest: Union[IndirectToken, int, BasicBlock]
             if addr is None:
                 # Statically Unknown Branch Location (e.g. indirect jump)
                 dest = IndirectToken()
@@ -415,7 +416,10 @@ class BasicBlock(NativeCode):
         elif isinstance(x, int):
             if self.address is None:
                 raise RuntimeError("BasicBlock has no address")
-            return x >= self.address and x <= (self.address + len(self))
+            end = self.end()
+            if end is None:
+                raise RuntimeError("Unreachable Code")
+            return x >= self.address and x <= end
         raise TypeError
 
     def __bytes__(self):
@@ -423,6 +427,18 @@ class BasicBlock(NativeCode):
         for instr in self.instructions:
             b += instr.data
         return b
+
+    def __str__(self) -> str:
+        addr = "N/A" if self.address is None else hex(self.address)
+        return f"<BasicBlock addr={addr}>"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def end(self) -> Optional[int]:
+        if self.address is None:
+            return None
+        return self.address + len(self)
 
     def set_function(self, func: NativeFunction):
         self._function = func
@@ -555,6 +571,13 @@ class NativeFunction(NativeCode):
             return any([x in bb for bb in self.basic_blocks])
         raise TypeError
 
+    def __str__(self) -> str:
+        addr = "N/A" if self.address is None else hex(self.address)
+        return f"<Function {self.name}({','.join([str(arg) for arg in self.argv])}) address={addr}>"
+
+    def __repr__(self) -> str:
+        return str(self)
+
     def __bytes__(self):
         """Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
@@ -572,6 +595,12 @@ class NativeFunction(NativeCode):
 
     def end(self):
         return [self._block_lookup[e] for e in self.end_block_addrs]
+
+    @property
+    def name(self) -> str:
+        if self.names is None:
+            return "N/A"
+        return self.names[0]
 
     @property
     def calls(self):
@@ -596,30 +625,40 @@ class NativeFunction(NativeCode):
                 yield f
 
     @cached_property
-    def cfg(self) -> nx.MultiDiGraph:
+    def cfg(self) -> nx.DiGraph:
         """Control Flow Graph of the Function"""
 
-        cfg: nx.MultiDiGraph = nx.MultiDiGraph()
-        self._cfg(set(), cfg, self.start())
+        cfg: nx.DiGraph = nx.DiGraph()
+        history: Set[BasicBlock] = set()
+        bbs_to_explore: List[BasicBlock] = [self.start()]
 
-        return cfg
-
-    def _cfg(self, history, g, bb: BasicBlock):
-        if bb in history:
-            return
-
-        history.add(bb)
-        g.add_node(bb)
-
-        for btype, dest in bb:
-            if dest not in self._block_lookup:
+        while len(bbs_to_explore) > 0:
+            curr = bbs_to_explore.pop()
+            if curr in history:
                 continue
 
-            g.add_node(dest)
-            g.add_edge(bb, dest, branch=btype)
+            history.add(curr)
+            cfg.add_node(curr)
 
-            if isinstance(dest, BasicBlock):
-                self._cfg(history, g, dest)
+            for btype, dest in curr:
+                if isinstance(dest, IndirectToken):
+                    continue
+
+                if isinstance(dest, BasicBlock):
+                    branch_addr = dest.address
+                else:
+                    branch_addr = dest
+
+                if branch_addr not in self._block_lookup:
+                    continue
+
+                cfg.add_node(dest)
+                cfg.add_edge(curr, dest, branch=btype)
+
+                if isinstance(dest, BasicBlock):
+                    bbs_to_explore.append(dest)
+
+        return cfg
 
     @cached_property
     def xrefs(self) -> Set[Reference]:
@@ -1061,17 +1100,18 @@ class Binary(NativeCode):
         self._path = path
 
     @cached_property
-    def call_graph(self) -> nx.MultiDiGraph:
+    def call_graph(self) -> nx.DiGraph:
         """Function Call Graph"""
-        g: nx.MultiDiGraph = nx.MultiDiGraph()
+        g: nx.DiGraph = nx.DiGraph()
         for f in self.functions:
             g.add_node(f)
             for child_f in f.calls:
                 g.add_node(child_f)
                 g.add_edge(f, child_f)
+
             for parent_f in f.callers:
                 g.add_node(parent_f)
-                g.add_edge(f, parent_f)
+                g.add_edge(parent_f, f)
         return g
 
     @computed_field(repr=False)  # type: ignore[misc]
