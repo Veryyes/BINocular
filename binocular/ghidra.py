@@ -83,7 +83,7 @@ class PipeRPC:
     RESFMT = "!BI"
     RESFMT_SIZE = struct.calcsize(RESFMT)
 
-    def __init__(self, unix_socket: str, timeout: int = 30):
+    def __init__(self, unix_socket: str, timeout: int = 5):
         self.unix_socket: str = unix_socket
         self.sock: socket.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.is_connected: bool = False
@@ -453,7 +453,6 @@ class Ghidra(Disassembler):
         project_path: Optional[str] = None,
         home: Optional[str] = None,
         cpus: int = 1,
-        analysis_timeout: Optional[int] = None,
     ):
         super().__init__(verbose=verbose)
 
@@ -485,7 +484,6 @@ class Ghidra(Disassembler):
         self.rpc_pipe: Optional[PipeRPC] = None
         self.proc_monitor: Optional[ProcMon] = None
         self.bin_name: Optional[str] = None
-        self.anal_time: Optional[int] = analysis_timeout
 
     def _analyze_headless_path(self) -> str:
         return os.path.join(self.ghidra_home, "support", "analyzeHeadless")
@@ -502,12 +500,7 @@ class Ghidra(Disassembler):
         self.bin_name = None
         self._close_rpc()
 
-    def analysis_timeout(self, bin_size) -> int:
-        # 30s +
-        # 1 minutes per 100KB
-        return round(30 + 60 * (bin_size / (1024)))
-
-    def analyze(self, path) -> Tuple[bool, Optional[str]]:
+    def analyze(self, path: str, timeout: int = 0) -> Tuple[bool, Optional[str]]:
         """
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
@@ -539,9 +532,7 @@ class Ghidra(Disassembler):
         os.makedirs(self.project_location, exist_ok=True)
         cmd += [self.project_location, self.project_name]
 
-        self.rpc_pipe = PipeRPC(
-            self.unix_socket, timeout=self.analysis_timeout(bin_size)
-        )
+        self.rpc_pipe = PipeRPC(self.unix_socket)
 
         # Run the BinocularPipe Script
         cmd += [
@@ -584,23 +575,14 @@ class Ghidra(Disassembler):
         self.proc_monitor.start()
 
         start = time.time()
-        timedout = False
 
         if self.ghidra_proc.poll() is not None:
             raise RuntimeError("Ghidra Analyzeheadless is not running")
 
-        if self.anal_time is None:
-            timeout = self.analysis_timeout(bin_size)
-        elif self.anal_time <= 0:
-            timeout = None
-        else:
-            timeout = self.anal_time
-
         logger.debug(f"Waiting at least {timeout}s for Analysis to finish")
         while (
-            timedout := (timeout is None or time.time() - start < timeout)
-            and self.ghidra_proc.poll() is None
-        ):
+            timeout == 0 or time.time() - start < timeout
+        ) and self.ghidra_proc.poll() is None:
             if "BINocularPipe Ready" in self.proc_monitor:
                 return True, None
             time.sleep(0.01)
@@ -985,7 +967,7 @@ class Ghidra(Disassembler):
     def run_script(
         self,
         script: str,
-        timeout: int,
+        timeout: int = 0,
         script_args: Optional[List[str]] = None,
         script_path: Optional[str] = None,
     ) -> Optional[str]:
@@ -1038,7 +1020,11 @@ class Ghidra(Disassembler):
         try:
             start = time.time()
 
-            while time.time() - start < timeout and script_proc.poll() is None:
+            while (
+                timeout > 0
+                or time.time() - start < timeout
+                and script_proc.poll() is None
+            ):
                 if "Unable to lock project" in script_monitor:
                     logger.error(
                         f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}"
