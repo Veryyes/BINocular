@@ -203,19 +203,13 @@ class ProcMon(threading.Thread):
         self.running = True
         while self.running and self.proc.poll() is None:
             out = self.proc.stdout.read1(self.chunk_len)
-            # err = self.proc.stderr.read1(self.chunk_len)
-            # print('err')
-            if out is None:  # and err is None:
+            if out is None:
                 time.sleep(1)
             else:
                 if out:
                     self.stdout += str(out, "utf8")
-                # if err:
-                #     self.stderr += str(err, "utf8")
 
             time.sleep(0.250)
-        # self.stderr = str(self.proc.stderr.read(), 'utf8')
-
         out = self.proc.stdout.read()
         if out:
             self.stdout += str(out, "utf8")
@@ -283,14 +277,19 @@ class Ghidra(Disassembler):
         version: Optional[str],
         install_dir: str,
         local_install_file: Optional[str] = None,
-    ):
+    ) -> str | None:
         if local_install_file is None:
             # Ask Github API for Ghidra Release versions and the
             # prebuilt download link
-            r = requests.get(Ghidra.GITHUB_API)
-            if r.status_code != 200:
-                logger.critical(f"Cannot reach {Ghidra.GITHUB_API}")
-                raise Exception(f"Cannot reach {Ghidra.GITHUB_API}")
+            try:
+                r = requests.get(Ghidra.GITHUB_API)
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"Failed to reach Github: {e}")
+                return None
+
+            if not r.ok:
+                logger.error(f"Cannot reach {Ghidra.GITHUB_API}")
+                return None
 
             release_data = json.loads(r.text)
             links = OrderedDict()
@@ -303,35 +302,48 @@ class Ghidra(Disassembler):
                 # Version not specified. getting latest
                 version = next(iter(links.keys()))
             elif version not in links:
-                logger.critical(f"Ghidra version {version} not found")
-                raise Exception(f"Ghidra version {version} not found")
+                logger.error(f"Ghidra version {version} not found")
+                return None
 
             dl_link = links[version]
-
             logger.info(f"Installing Ghidra {version} to {install_dir}")
             logger.info(f"Downloading {dl_link}...")
 
-            with tempfile.TemporaryFile() as fp:
-                fp.write(urlopen(dl_link).read())
-                fp.seek(0)
-                logger.info("Extracting Ghidra")
-                with zipfile.ZipFile(fp, "r") as zf:
-                    zf.extractall(install_dir)
+            try:
+                with tempfile.TemporaryFile() as fp:
+                    fp.write(urlopen(dl_link).read())
+                    fp.seek(0)
+                    logger.info("Extracting Ghidra")
+                    with zipfile.ZipFile(fp, "r") as zf:
+                        zf.extractall(install_dir)
+            except IOError as e:
+                logger.error(f"Failed to download or extract Ghidra: {e}")
+                return None
         else:
             if not os.path.exists(local_install_file):
-                raise Exception(f"File Does not Exist: {local_install_file}")
+                logger.error(f"File Does not Exist: {local_install_file}")
+                return None
 
             # Assume this is a zip of a Ghidra Release
-            with open(local_install_file, "rb") as fp:
-                with zipfile.ZipFile(fp, "r") as zf:
-                    zf.extractall(install_dir)
+            try:
+                with open(local_install_file, "rb") as fp:
+                    with zipfile.ZipFile(fp, "r") as zf:
+                        zf.extractall(install_dir)
+            except IOError as e:
+                logger.error(
+                    f"{e}: Failed to extract local Ghidra distribution: {local_install_file}"
+                )
+                return None
 
-        return os.path.join(install_dir, os.listdir(install_dir)[0])
+        home = os.path.join(install_dir, os.listdir(install_dir)[0])
+        if not os.path.exists(home):
+            logger.error(f"Failed to find expected Ghidra installation")
+            return None
+
+        return home
 
     @classmethod
-    def _build(cls, version: Optional[str], install_dir: str):
-        if version is None:
-            raise ValueError("No commit version supplied")
+    def _build(cls, version: str, install_dir: str) -> str | None:
 
         logger.info(f"Building Ghidra @ commit {version}")
 
@@ -340,13 +352,13 @@ class Ghidra(Disassembler):
             logger.critical(
                 "Can't find java. Is JDK 21 installed? Download here: https://adoptium.net/temurin/releases/"
             )
-            exit(1)
+            return None
 
         if shutil.which("gradle") is None:
             logger.critical(
                 "Can't find gradle. Gradle 8.5+ required. Download here: https://gradle.org/releases/"
             )
-            exit(1)
+            return None
 
         logger.info(f"Cloning Ghidra {version} to: {install_dir}")
         try:
@@ -373,7 +385,8 @@ class Ghidra(Disassembler):
             # remove init in gradle command
             del cmds[0][-1]
         else:
-            raise Exception("Is {version} a valid commit hash?")
+            logger.error(f"Is {version} a valid commit hash?")
+            return None
 
         for cmd in cmds:
             logger.info(f"$ {' '.join(cmd)}")
@@ -384,12 +397,25 @@ class Ghidra(Disassembler):
                 logger.info(f"[STDERR] {err}")
 
         dist = os.path.join(install_dir, "build", "dist")
-        zip_file = os.path.join(dist, os.listdir(dist)[0])
-        with open(zip_file, "rb") as f:
-            with zipfile.ZipFile(f, "r") as zf:
-                zf.extractall(dist)
+        if not os.path.exists(dist):
+            logger.error(f"Expected directory to exist. Did Ghidra build fail? {dist}")
+            return None
 
-        return os.path.join(dist, "_".join(os.path.basename(zip_file).split("_")[:3]))
+        try:
+            zip_file = os.path.join(dist, os.listdir(dist)[0])
+            with open(zip_file, "rb") as f:
+                with zipfile.ZipFile(f, "r") as zf:
+                    zf.extractall(dist)
+        except IOError as e:
+            logger.error(f"{e}: Failed to extract Ghidra distribution: {zip_file}")
+            return None
+
+        home = os.path.join(dist, "_".join(os.path.basename(zip_file).split("_")[:3]))
+        if not os.path.exists(home):
+            logger.error(f"Failed to find expected Ghidra installation")
+            return None
+
+        return home
 
     @classmethod
     def install(
@@ -398,7 +424,7 @@ class Ghidra(Disassembler):
         install_dir: Optional[str] = None,
         build: Optional[bool] = False,
         local_install_file: Optional[str] = None,
-    ) -> str:
+    ) -> str | None:
         """
         Installs the disassembler to a user specified directory or within the python module if none is specified
         :param version: Release Version Number or Commit Hash
@@ -411,21 +437,32 @@ class Ghidra(Disassembler):
         os.makedirs(install_dir, exist_ok=True)
 
         if build:
+            if version is None:
+                logger.error(f"`version` must be a commmit hash if `build=true`")
+                return None
+
             ghidra_home = Ghidra._build(version, install_dir)
         else:
             ghidra_home = Ghidra._install_prebuilt(
                 version, install_dir, local_install_file=local_install_file
             )
+        if ghidra_home is None:
+            logger.error(f"Failed to install Ghidra {version}")
+            return None
 
         logger.info("Ghidra Install Completed")
-        assert os.path.exists(ghidra_home)
 
         # Permission to execute stuff in Ghidra Home
-        os.chmod(os.path.join(ghidra_home, "support", "launch.sh"), 0o775)
-        for root, _, files in os.walk(ghidra_home):
-            for fname in files:
-                fpath = os.path.join(root, fname)
-                os.chmod(fpath, 0o775)
+        try:
+            os.chmod(os.path.join(ghidra_home, "support", "launch.sh"), 0o775)
+            for root, _, files in os.walk(ghidra_home):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    os.chmod(fpath, 0o775)
+        except IOError as e:
+            logger.warning(
+                f"{e}: Failed to set 775 permissions to files in {ghidra_home}"
+            )
 
         return ghidra_home
 

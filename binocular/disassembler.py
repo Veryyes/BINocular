@@ -471,7 +471,7 @@ class Disassembler(ABC):
         install_dir: Optional[str] = None,
         build: Optional[bool] = False,
         local_install_file: Optional[str] = None,
-    ) -> str:
+    ) -> str | None:
         """
         Installs the disassembler to a user specified directory or within the python module if none is specified
         :param version: The release version or commit hash. If commit hash is provided build must be set True. Ignored if local_install_file is provided
