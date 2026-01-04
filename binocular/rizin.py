@@ -164,7 +164,7 @@ class Rizin(Disassembler):
         self.rizin_home: Optional[str] = home
         self._pipe: Optional[rzpipe.open] = None
 
-        self._bin_info: Optional[Any] = None
+        self._bin_info: Optional[Dict[str, Any]] = None
         self._thunk_dict: Dict[int, bool] = dict()
         self._caller_cache: defaultdict[int, Set] = defaultdict(lambda: set())
         self._calls_cache: defaultdict[int, Set] = defaultdict(lambda: set())
@@ -213,7 +213,6 @@ class Rizin(Disassembler):
 
         self._pipe.cmd("aaaa")
         self._bin_info = self._pipe.cmdj("ij")["bin"]
-
         return True, None
 
     def _post_normalize(self):
@@ -261,8 +260,9 @@ class Rizin(Disassembler):
         """Returns the base address the binary is based at"""
         if self._pipe is None:
             raise RZPipeNotOpen
-
-        return int(self._pipe.cmd("echo $B"), 16)
+        if self._bin_info is None:
+            raise Disassembler.AnalyzeNotRun
+        return self._bin_info["baddr"]
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         """Returns the list of defined strings in the binary"""

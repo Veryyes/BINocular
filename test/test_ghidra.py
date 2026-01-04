@@ -1,5 +1,4 @@
 import itertools
-import json
 import os
 import tempfile
 from urllib.request import urlopen
@@ -7,7 +6,14 @@ from urllib.request import urlopen
 from binocular import Binary, Ghidra
 
 
-def test_install_release():
+def test_install_release_12():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not Ghidra.is_installed(install_dir=tmpdirname)
+        Ghidra.install(version="12.0", install_dir=tmpdirname)
+        assert Ghidra.is_installed(install_dir=tmpdirname)
+
+
+def test_install_release_11():
     with tempfile.TemporaryDirectory() as tmpdirname:
         assert not Ghidra.is_installed(install_dir=tmpdirname)
         Ghidra.install(version="11.1.1", install_dir=tmpdirname)
@@ -128,6 +134,7 @@ def test_script(make):
     assert Ghidra.is_installed()
     with Ghidra() as g:
         g.load("example")
+        # TODO Ghidra was not started with PyGhidra. Python is not available (HeadlessAnalyzer) ghidra.app.script.GhidraScriptLoadException: Ghidra was not started with PyGhidra. Python is not available
         stdout = g.run_script("./ghidra_script.py", 10)
     assert "Ghidra Version:" in stdout
 
