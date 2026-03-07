@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import zipfile
+import logging
 from collections import OrderedDict
 from collections.abc import Iterable
 from enum import Enum
@@ -23,11 +24,13 @@ import git
 import requests  # type: ignore[import-untyped]
 from git import Repo
 
-from . import logger
-from .consts import IL, BranchType, Endian, RefType
-from .disassembler import Disassembler
-from .primitives import IR, Argument, Branch, Instruction, Reference, Variable
-from .utils import run_proc
+
+from ..consts import IL, BranchType, Endian, RefType
+from ..disassembler import Disassembler
+from ..primitives import IR, Argument, Branch, Instruction, Reference, Variable
+from ..utils import run_proc
+
+logger = logging.getLogger(__file__)
 
 
 class PipeRPCNotOpened(Exception):

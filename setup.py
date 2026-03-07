@@ -24,6 +24,7 @@ setup(
         "requests",
         "IPython",
         "sphinx",
+        "pyghidra",
     ],
     extras_require={
         "dev": [

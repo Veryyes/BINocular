@@ -11,7 +11,7 @@ coloredlogs.install(
 
 from .consts import IL, BranchType, Endian, IndirectToken
 from .disassembler import Backend, Disassembler
-from .ghidra import Ghidra
+from .ghidra.legacy import Ghidra
 from .primitives import (
     IR,
     Argument,
