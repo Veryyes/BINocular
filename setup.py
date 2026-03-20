@@ -38,6 +38,7 @@ setup(
             "types-networkx",
             "black",
             "types-requests",
+            "ghidra-stubs==12.0.0",
         ]
     },
     entry_points={"console_scripts": ["binocular = binocular.run:main"]},

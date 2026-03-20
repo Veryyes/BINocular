@@ -3,9 +3,13 @@ import bisect
 import os
 import string
 import time
+import pathlib
+import typing_extensions
+import types
+import functools
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import IO, Any, Dict, List, Optional, Set, Tuple
+from typing import IO, Any, Dict, List, Optional, Set, Tuple, Type
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine.base import Engine
@@ -58,23 +62,33 @@ class Disassembler(ABC):
     Abstract Class for a Disassembler.
     """
 
-    class FailedToLoadBinary(Exception):
+    class FailedToLoadBinaryError(Exception):
         """Raise when a Disassembler fails to load a binary"""
 
         pass
 
-    class ArchitectureNotSupported(Exception):
+    class ArchitectureNotSupportedError(Exception):
         """Raise when a disassembler receives a binary of an architecture that it does not support"""
 
         pass
 
-    class AnalyzeNotRun(Exception):
+    class NotOpenedError(RuntimeError):
         """Raised when Diassembler.analyze() needs to be called first in order for the function to work properly"""
 
-        pass
+        def __init__(self):
+            super().__init__(
+                f"Disassembler has not been opened with a binary yet. Call open() or use a Context Manager"
+            )
+
+    class AnalyzeNotRunError(NotOpenedError):
+        """Raised when Diassembler.analyze() needs to be called first in order for the function to work properly"""
+
+        def __init__(self):
+            super().__init__(f"analyzer() must be run first")
 
     def __init__(self, verbose: bool = True):
         self.verbose: bool = verbose
+        self.opened: bool = False
 
         self._bb_count: int = 0
         # maps function names to function objects
@@ -89,42 +103,61 @@ class Disassembler(ABC):
         self.binary: Optional[Binary] = None
         self.functions: Set[NativeFunction] = set()
 
-    def __enter__(self):
-        return self.open()
+        self._binary_filepath: pathlib.Path | None = None
 
-    def __exit__(self, type, value, tb):
-        self.close()
+    def __enter__(self, binary_path: str | pathlib.Path):
+        return self.open(binary_path)
 
+    def __exit__(
+        self,
+        type: Type[BaseException] | None,
+        value: BaseException | None,
+        tb: types.TracebackType | None,
+    ) -> bool | None:
+        return self.close()
+
+    @property
     def name(self):
         """Returns the Name of the Disassembler"""
         return self.__class__.__name__
 
-    def load(self, path, load_strings: bool = True):
+    @property
+    def binary_filepath(self) -> pathlib.Path:
+        if self._binary_filepath is not None:
+            return self._binary_filepath
+        raise Disassembler.NotOpenedError
+
+    @binary_filepath.setter
+    def binary_filepath(self, value: pathlib.Path) -> None:
+        self._binary_filepath = value
+
+    # remove all this and lazy load
+    def load(self, load_strings: bool = True, skip_analysis: bool = False):
         """
         Load a binary into the disassembler and trigger any default analysis
         :param path: The file path to binary to analyze
         """
-        logger.info(f"[{self.name()}] Analyzing {path}")
-        self._binary_filepath = path
+        logger.info(f"[{self.name()}] Analyzing {self.binary_filepath}")
 
         start = time.time()
-        success, err_msg = self.analyze(self._binary_filepath)
-        if not success:
-            raise Disassembler.FailedToLoadBinary(err_msg)
-        logger.info(f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s")
+
+        if not skip_analysis:
+            self.analyze()
+            logger.info(
+                f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s"
+            )
 
         start = time.time()
-        self._pre_normalize(path)
         self._create_binary(load_strings)
         if self.binary is None:
-            raise Disassembler.FailedToLoadBinary(
+            raise Disassembler.FailedToLoadBinaryError(
                 "binary member was not set. Something went wrong."
             )
         self._create_functions()
         self.binary.functions = self.functions
         for f in self.binary.functions:
             if f.address is None:
-                raise Disassembler.FailedToLoadBinary("Function with no address")
+                raise Disassembler.FailedToLoadBinaryError("Function with no address")
             self.binary._function_lookup[f.address] = f
 
         self._func_sorted = list(self._func_addrs)
@@ -135,11 +168,17 @@ class Disassembler(ABC):
         self._post_normalize()
         logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
 
+    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
+        """Open up any resources"""
+        self.opened = True
+        self.binary_filepath = pathlib.Path(binary_path)
+        return self
+
     def _create_binary(self, load_strings: bool):
         start = time.time()
 
         self.binary = Binary(
-            filename=os.path.basename(self._binary_filepath),
+            filename=os.path.basename(self.binary_filepath),
             names=[self.get_binary_name()],
             entrypoint=self.get_entry_point(),
             architecture=self.get_architecture(),
@@ -148,7 +187,7 @@ class Disassembler(ABC):
             base_addr=self.get_base_address(),
             dynamic_libs=self.get_dynamic_libs(),
         )
-        self.binary.set_path(self._binary_filepath)
+        self.binary.set_path(self.binary_filepath)
 
         io_stream = self.binary.io()
         if load_strings:
@@ -358,15 +397,6 @@ class Disassembler(ABC):
         """List installable verions of this disassembler"""
         return list()
 
-    def _pre_normalize(self, path):
-        """
-        Optional Function to Override. _pre_normalize is called before the the binary
-        at `path` is loaded into the underlying disassembler. This function provides
-        a way to add a custom preprocessing step.
-        :param path: path to the binary that is about to be analyzed
-        """
-        pass
-
     def _post_normalize(self):
         """
         Optional Function to Override. _post_normalize is called after the the binary
@@ -375,25 +405,9 @@ class Disassembler(ABC):
         """
         pass
 
-    def open(self):
-        """Open up any resources"""
-        return self
-
     def close(self):
         """Release/Free up any resources"""
-        pass
-
-    def clear(self):
-        """Reset any state within this object"""
-        self._bb_count = 0
-        self._func_names.clear()
-        self._func_addrs.clear()
-        self._func_sorted.clear()
-        self._bbs.clear()
-        self._bbs_sorted.clear()
-        self._instrs.clear()
-        self.binary = None
-        self.functions.clear()
+        self.opened = False
 
     def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
         """
@@ -427,7 +441,7 @@ class Disassembler(ABC):
 
     def get_binary_name(self) -> str:
         """Returns the name of the binary loaded"""
-        return os.path.basename(self._binary_filepath)
+        return self.binary_filepath.name
 
     def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
@@ -449,7 +463,9 @@ class Disassembler(ABC):
         """Return comments at the instruction"""
         return None
 
-    def run_script(self, script: str, timeout: int) -> Optional[str]:
+    def run_script(
+        self, script: str, timeout: int, script_args: List[str] | None = None
+    ) -> str | None:
         """Run a custom script"""
         return None
 
@@ -482,14 +498,13 @@ class Disassembler(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def analyze(self, path) -> Tuple[bool, Optional[str]]:
+    def analyze(self) -> None:
         """
-        Loads the binary specified by `path` into the disassembler.
+        Starts analysis of the binary loaded from open or with a context manager
         Implement all diaassembler specific setup and trigger analysis here.
-        :returns: (True, optional message) on success, (False, failure reason) otherwise
         """
-        raise NotImplementedError
+        if not self.opened:
+            raise Disassembler.NotOpenedError()
 
     @abstractmethod
     def get_entry_point(self) -> int:

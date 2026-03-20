@@ -134,8 +134,9 @@ def test_script(make):
     assert Ghidra.is_installed()
     with Ghidra() as g:
         g.load("example")
-        # TODO Ghidra was not started with PyGhidra. Python is not available (HeadlessAnalyzer) ghidra.app.script.GhidraScriptLoadException: Ghidra was not started with PyGhidra. Python is not available
         stdout = g.run_script("./ghidra_script.py", 10)
+
+    assert stdout is not None
     assert "Ghidra Version:" in stdout
 
 
@@ -145,5 +146,14 @@ def test_script_args(make):
         g.load("example")
         script_args = ["ARRRGH", "BLEHH", "BIN OCULAR", '"X"']
         stdout = g.run_script("./ghidra_script_args.py", 10, script_args=script_args)
+        assert stdout is not None
         for a in script_args:
             assert a in stdout
+
+
+def test_script_java(make):
+    assert Ghidra.is_installed()
+    with Ghidra() as g:
+        g.load("example")
+        stdout = g.run_script("HelloWorld.java", 10)
+    assert "Hello, World!" in stdout

@@ -1,36 +1,23 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-import pkgutil
-import re
-import shutil
 import socket
 import struct
 import subprocess
-import tempfile
 import threading
 import time
-import zipfile
-import logging
-from collections import OrderedDict
+import pathlib
+import typing_extensions
 from collections.abc import Iterable
 from enum import Enum
 from typing import IO, Any, List, Optional, Tuple
-from urllib.request import urlopen
-
-import git
-import requests  # type: ignore[import-untyped]
-from git import Repo
 
 
+from .core import GhidraBase
+
+from .. import logger
 from ..consts import IL, BranchType, Endian, RefType
-from ..disassembler import Disassembler
 from ..primitives import IR, Argument, Branch, Instruction, Reference, Variable
-from ..utils import run_proc
-
-logger = logging.getLogger(__file__)
 
 
 class PipeRPCNotOpened(Exception):
@@ -154,7 +141,7 @@ class PipeRPC:
         start = time.time()
         header = b""
         header = self._recv_bytes(self.sock, PipeRPC.RESFMT_SIZE, timeout=self.timeout)
-        # logger.debug(f"Received Bytes: {header}")
+
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
         if res_id != id + 1:
             raise Exception(
@@ -221,272 +208,7 @@ class ProcMon(threading.Thread):
         self.running = False
 
 
-def gzf_project_name(gzf_path: str) -> Optional[str]:
-    if not os.path.exists(gzf_path):
-        return None
-
-    if not os.path.isfile(gzf_path):
-        return None
-
-    # Slightly Scuff. Subject to change if serialization format changes
-    with open(gzf_path, "rb") as f:
-        f.seek(0x12)
-        proj_name_len = struct.unpack(">H", f.read(2))[0]
-        return str(f.read(proj_name_len), "utf8")
-
-
-class Ghidra(Disassembler):
-    GIT_REPO = "https://github.com/NationalSecurityAgency/ghidra.git"
-    GITHUB_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
-
-    @staticmethod
-    def DEFAULT_INSTALL():
-        """Default Install Location for Ghidra (Within Python Package Installation)"""
-        return os.path.join(
-            os.path.dirname(pkgutil.get_loader("binocular").path), "data", "ghidra"
-        )
-
-    @staticmethod
-    def DEFAULT_PROJECT_PATH():
-        """Default Ghidra Project Path (Within Python Package Installation)"""
-        return os.path.join(
-            os.path.dirname(pkgutil.get_loader("binocular").path), "data", "ghidra_proj"
-        )
-
-    @staticmethod
-    def SCRIPT_PATH():
-        return os.path.join(
-            os.path.join(os.path.dirname(pkgutil.get_loader("binocular").path)),
-            "scripts",
-        )
-
-    @classmethod
-    def list_versions(cls):
-        r = requests.get(cls.GITHUB_API)
-        if r.status_code != 200:
-            raise Exception(f"Cannot reach {cls.GITHUB_API}")
-
-        release_data = json.loads(r.text)
-        versions = list()
-        for release in release_data:
-            ver = release["name"].rsplit(" ", 1)[1]
-            versions.append(ver.strip())
-
-        return versions
-
-    @classmethod
-    def _install_prebuilt(
-        cls,
-        version: Optional[str],
-        install_dir: str,
-        local_install_file: Optional[str] = None,
-    ) -> str | None:
-        if local_install_file is None:
-            # Ask Github API for Ghidra Release versions and the
-            # prebuilt download link
-            try:
-                r = requests.get(Ghidra.GITHUB_API)
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f"Failed to reach Github: {e}")
-                return None
-
-            if not r.ok:
-                logger.error(f"Cannot reach {Ghidra.GITHUB_API}")
-                return None
-
-            release_data = json.loads(r.text)
-            links = OrderedDict()
-            for release in release_data:
-                ver = release["name"].rsplit(" ", 1)[1].strip()
-                dl_link = release["assets"][0]["browser_download_url"]
-                links[ver] = dl_link
-
-            if version is None:
-                # Version not specified. getting latest
-                version = next(iter(links.keys()))
-            elif version not in links:
-                logger.error(f"Ghidra version {version} not found")
-                return None
-
-            dl_link = links[version]
-            logger.info(f"Installing Ghidra {version} to {install_dir}")
-            logger.info(f"Downloading {dl_link}...")
-
-            try:
-                with tempfile.TemporaryFile() as fp:
-                    fp.write(urlopen(dl_link).read())
-                    fp.seek(0)
-                    logger.info("Extracting Ghidra")
-                    with zipfile.ZipFile(fp, "r") as zf:
-                        zf.extractall(install_dir)
-            except IOError as e:
-                logger.error(f"Failed to download or extract Ghidra: {e}")
-                return None
-        else:
-            if not os.path.exists(local_install_file):
-                logger.error(f"File Does not Exist: {local_install_file}")
-                return None
-
-            # Assume this is a zip of a Ghidra Release
-            try:
-                with open(local_install_file, "rb") as fp:
-                    with zipfile.ZipFile(fp, "r") as zf:
-                        zf.extractall(install_dir)
-            except IOError as e:
-                logger.error(
-                    f"{e}: Failed to extract local Ghidra distribution: {local_install_file}"
-                )
-                return None
-
-        home = os.path.join(install_dir, os.listdir(install_dir)[0])
-        if not os.path.exists(home):
-            logger.error(f"Failed to find expected Ghidra installation")
-            return None
-
-        return home
-
-    @classmethod
-    def _build(cls, version: str, install_dir: str) -> str | None:
-
-        logger.info(f"Building Ghidra @ commit {version}")
-
-        # dependency check
-        if shutil.which("java") is None:
-            logger.critical(
-                "Can't find java. Is JDK 21 installed? Download here: https://adoptium.net/temurin/releases/"
-            )
-            return None
-
-        if shutil.which("gradle") is None:
-            logger.critical(
-                "Can't find gradle. Gradle 8.5+ required. Download here: https://gradle.org/releases/"
-            )
-            return None
-
-        logger.info(f"Cloning Ghidra {version} to: {install_dir}")
-        try:
-            repo = Repo.clone_from(Ghidra.GIT_REPO, install_dir)
-        except git.GitCommandError:
-            logger.info("Ghidra Already Cloned")
-            repo = Repo(install_dir)
-
-        repo.git.checkout(version)
-
-        cmds = [
-            ["gradle", "-I", "gradle/support/fetchDependencies.gradle", "init"],
-            ["gradle", "buildGhidra"],
-        ]
-
-        no_init_gradle_commit = repo.commit("30628db2d09d7b4ce46368b7522dc315e7b245c5")
-        target_commit = repo.commit(version)
-
-        common_ancestor = repo.merge_base(no_init_gradle_commit, target_commit)
-        if target_commit in common_ancestor:
-            # do nothing
-            pass
-        elif no_init_gradle_commit in common_ancestor:
-            # remove init in gradle command
-            del cmds[0][-1]
-        else:
-            logger.error(f"Is {version} a valid commit hash?")
-            return None
-
-        for cmd in cmds:
-            logger.info(f"$ {' '.join(cmd)}")
-            out, err = run_proc(cmd=cmd, timeout=None, cwd=install_dir)
-            if len(out) > 0:
-                logger.info(f"[STDOUT] {out}")
-            if len(err) > 0:
-                logger.info(f"[STDERR] {err}")
-
-        dist = os.path.join(install_dir, "build", "dist")
-        if not os.path.exists(dist):
-            logger.error(f"Expected directory to exist. Did Ghidra build fail? {dist}")
-            return None
-
-        try:
-            zip_file = os.path.join(dist, os.listdir(dist)[0])
-            with open(zip_file, "rb") as f:
-                with zipfile.ZipFile(f, "r") as zf:
-                    zf.extractall(dist)
-        except IOError as e:
-            logger.error(f"{e}: Failed to extract Ghidra distribution: {zip_file}")
-            return None
-
-        home = os.path.join(dist, "_".join(os.path.basename(zip_file).split("_")[:3]))
-        if not os.path.exists(home):
-            logger.error(f"Failed to find expected Ghidra installation")
-            return None
-
-        return home
-
-    @classmethod
-    def install(
-        cls,
-        version: Optional[str] = None,
-        install_dir: Optional[str] = None,
-        build: Optional[bool] = False,
-        local_install_file: Optional[str] = None,
-    ) -> str | None:
-        """
-        Installs the disassembler to a user specified directory or within the python module if none is specified
-        :param version: Release Version Number or Commit Hash
-        :param install_dir: the directory to install Ghidra to
-        :param build: True if version is a Commit Hash.
-        """
-        if install_dir is None:
-            install_dir = Ghidra.DEFAULT_INSTALL()
-
-        os.makedirs(install_dir, exist_ok=True)
-
-        if build:
-            if version is None:
-                logger.error(f"`version` must be a commmit hash if `build=true`")
-                return None
-
-            ghidra_home = Ghidra._build(version, install_dir)
-        else:
-            ghidra_home = Ghidra._install_prebuilt(
-                version, install_dir, local_install_file=local_install_file
-            )
-        if ghidra_home is None:
-            logger.error(f"Failed to install Ghidra {version}")
-            return None
-
-        logger.info("Ghidra Install Completed")
-
-        # Permission to execute stuff in Ghidra Home
-        try:
-            os.chmod(os.path.join(ghidra_home, "support", "launch.sh"), 0o775)
-            for root, _, files in os.walk(ghidra_home):
-                for fname in files:
-                    fpath = os.path.join(root, fname)
-                    os.chmod(fpath, 0o775)
-        except IOError as e:
-            logger.warning(
-                f"{e}: Failed to set 775 permissions to files in {ghidra_home}"
-            )
-
-        return ghidra_home
-
-    @classmethod
-    def is_installed(cls, install_dir: Optional[str] = None) -> bool:
-        """Returns Boolean on whether or not the dissassembler is installed"""
-        os.makedirs(Ghidra.DEFAULT_INSTALL(), exist_ok=True)
-
-        if install_dir is None:
-            install_dir = Ghidra.DEFAULT_INSTALL()
-
-        if len(os.listdir(install_dir)) == 0:
-            return False
-
-        release_install = os.path.join(install_dir, os.listdir(install_dir)[0])
-        release_install = os.path.join(release_install, "support", "launch.sh")
-
-        build_install = os.path.join(install_dir, "build", "dist")
-
-        return os.path.exists(release_install) or os.path.exists(build_install)
-
+class GhidraLegacy(GhidraBase):
     def __init__(
         self,
         verbose: bool = True,
@@ -495,98 +217,40 @@ class Ghidra(Disassembler):
         cpus: int = 1,
         analysis_timeout: Optional[int] = None,
     ):
-        super().__init__(verbose=verbose)
-
-        if project_path is None:
-            project_path = Ghidra.DEFAULT_PROJECT_PATH()
-        self.base_project_path = project_path
-
-        self.ghidra_home: str
-        if home is None:
-            ghidra_release_patttern = re.compile(r"ghidra_(\d+(\.\d+)*)_PUBLIC")
-            ghidra_dir = None
-            for dir in os.listdir(Ghidra.DEFAULT_INSTALL()):
-                if ghidra_release_patttern.match(dir):
-                    ghidra_dir = dir
-                    break
-
-            if ghidra_dir is None:
-                raise Exception(
-                    f"Unable to find Ghidra install directory inside of {self.ghidra_home}"
-                )
-
-            self.ghidra_home = os.path.join(Ghidra.DEFAULT_INSTALL(), ghidra_dir)
-        else:
-            self.ghidra_home = home
-
+        super().__init__(verbose=verbose, project_path=project_path, home=home)
         self.cpus: int = cpus
         self.ghidra_proc: Optional[subprocess.Popen] = None
         self.unix_socket: str = os.path.join("/tmp", f"binocular_ghidra_{os.getpid()}")
         self.rpc_pipe: Optional[PipeRPC] = None
         self.proc_monitor: Optional[ProcMon] = None
-        self.bin_name: Optional[str] = None
         self.anal_time: Optional[int] = analysis_timeout
-
-    def _analyze_headless_path(self) -> str:
-        return os.path.join(self.ghidra_home, "support", "analyzeHeadless")
-
-    def open(self):
-        return self
-
-    # TODO type hint
-    def close(self):
-        self.clear()
-
-    def clear(self):
-        super().clear()
-        self.bin_name = None
-        self._close_rpc()
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s +
         # 1 minutes per 100KB
         return round(30 + 60 * (bin_size / (1024)))
 
-    def analyze(self, path) -> Tuple[bool, Optional[str]]:
+    def analyze(self) -> None:
         """
         Loads the binary specified by `path` into the disassembler.
         Implement all diaassembler specific setup and trigger analysis here.
         :returns: (True, optional message) on success, (False, failure reason) otherwise
         """
+        super().analyze()
 
-        # CHECK IN
-        bin_size = 0
-        m = hashlib.md5()
-        with open(path, "rb") as f:
-            chunk = f.read(4096)
-            while chunk:
-                m.update(chunk)
-                bin_size += len(chunk)
-                chunk = f.read(4096)
-
-        md5hash = m.hexdigest()
-
-        imported = False
-
-        # PROJECT SETUP
         cmd = [self._analyze_headless_path()]
-        # Containing folder of the project is the same name of the project
-        # A little cleaner to handle when you can just rm the <md5sum>/ to
-        # delete a whole project if need be
-        self.project_location = os.path.join(self.base_project_path, md5hash)
-        self.project_name = md5hash
         imported = os.path.exists(self.project_location)
         os.makedirs(self.project_location, exist_ok=True)
         cmd += [self.project_location, self.project_name]
 
         self.rpc_pipe = PipeRPC(
-            self.unix_socket, timeout=self.analysis_timeout(bin_size)
+            self.unix_socket, timeout=self.analysis_timeout(self.bin_size)
         )
 
         # Run the BinocularPipe Script
         cmd += [
             "-scriptPath",
-            Ghidra.SCRIPT_PATH(),
+            self.SCRIPT_PATH(),
             "-postScript",
             "BinocularPipe.java",
             self.unix_socket,
@@ -594,19 +258,9 @@ class Ghidra(Disassembler):
             str(self.cpus),
         ]
 
-        self.bin_name = os.path.basename(path)
-        if self.bin_name is None:
-            return False, f"Failed to resolve input binary from path: {path}"
-
-        if self.bin_name.endswith(".gzf"):
-            self.bin_name = gzf_project_name(path)
-
-        if self.bin_name is None:
-            return False, f"Failed to resolve input binary from path: {path}"
-
         logger.info(f"Loading: {self.bin_name}")
         if not imported:
-            cmd += ["-import", str(path)]
+            cmd += ["-import", str(self.binary_filepath)]
         else:
             cmd += ["-process", self.bin_name]
 
@@ -624,13 +278,11 @@ class Ghidra(Disassembler):
         self.proc_monitor.start()
 
         start = time.time()
-        timedout = False
-
         if self.ghidra_proc.poll() is not None:
             raise RuntimeError("Ghidra Analyzeheadless is not running")
 
         if self.anal_time is None:
-            timeout = self.analysis_timeout(bin_size)
+            timeout = self.analysis_timeout(self.bin_size)
         elif self.anal_time <= 0:
             timeout = None
         else:
@@ -638,11 +290,10 @@ class Ghidra(Disassembler):
 
         logger.debug(f"Waiting at least {timeout}s for Analysis to finish")
         while (
-            timedout := (timeout is None or time.time() - start < timeout)
-            and self.ghidra_proc.poll() is None
-        ):
+            timeout is None or time.time() - start < timeout
+        ) and self.ghidra_proc.poll() is None:
             if "BINocularPipe Ready" in self.proc_monitor:
-                return True, None
+                return
             time.sleep(0.01)
 
         if self.ghidra_proc.poll() is not None:
@@ -650,7 +301,7 @@ class Ghidra(Disassembler):
             logger.debug(self.proc_monitor.stdout)
 
         if "Unable to lock project" in self.proc_monitor:
-            logger.error(
+            raise RuntimeError(
                 f"Unable to lock project: {os.path.join(self.project_location, self.project_name + '.lock')}. Exiting"
             )
 
@@ -658,8 +309,7 @@ class Ghidra(Disassembler):
         self.proc_monitor.stop()
         self.proc_monitor.join()
         self._kill_headless()
-        print(self.proc_monitor.stdout)
-        return False, "Analyze Headless Timedout"
+        raise RuntimeError("Analyze Headless Timeout")
 
     def _kill_headless(self):
         if self.ghidra_proc is None:
@@ -1031,7 +681,7 @@ class Ghidra(Disassembler):
     ) -> Optional[str]:
         """Run a custom script"""
         curr_script_path = (
-            os.path.join(Ghidra.SCRIPT_PATH(), script)
+            os.path.join(self.SCRIPT_PATH(), script)
             if script_path is None
             else os.path.join(os.path.realpath(script_path), script)
         )
@@ -1051,7 +701,7 @@ class Ghidra(Disassembler):
             self.project_location,
             self.project_name,
             "-scriptPath",
-            Ghidra.SCRIPT_PATH() if script_path is None else script_path,
+            self.SCRIPT_PATH() if script_path is None else script_path,
             "-max-cpu",
             str(self.cpus),
             "-process",
