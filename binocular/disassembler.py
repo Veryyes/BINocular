@@ -11,12 +11,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine.base import Engine
 
 from . import logger
 from .consts import Endian
-from .db import Base
 from .primitives import (
     IR,
     Argument,
@@ -29,32 +26,6 @@ from .primitives import (
     SourceFunction,
     Variable,
 )
-
-
-class Backend:
-    """
-    Wrapper for a sqlachemy.Engine
-    """
-
-    engine: Optional[Engine] = None
-
-    @classmethod
-    def set_engine(cls, db_uri: str) -> Engine:
-        if Backend.engine is None:
-            Backend.engine = create_engine(db_uri)
-            Base.metadata.create_all(Backend.engine)
-
-        return Backend.engine
-
-    def __init__(self, disassembler: Optional[Disassembler] = None):
-        self.disassembler: Optional[Disassembler] = disassembler
-
-    @property
-    def db(self) -> Engine:
-        if Backend.engine is None:
-            raise RuntimeError("Engine must be set")
-
-        return Backend.engine
 
 
 def requires_load(func):

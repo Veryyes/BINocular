@@ -10,7 +10,7 @@ coloredlogs.install(
 )
 
 from .consts import IL, BranchType, Endian, IndirectToken
-from .disassembler import Backend, Disassembler
+from .disassembler import Disassembler
 from .ghidra_impl.legacy import GhidraLegacy  # Ghidra < 12.0.0
 from .ghidra_impl.dragon import Ghidra  # Ghidra >= 12.0.0
 from .primitives import (
@@ -31,7 +31,6 @@ __all__ = [
     "Argument",
     "Branch",
     "IR",
-    "Backend",
     "Instruction",
     "BasicBlock",
     "NativeFunction",

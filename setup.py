@@ -12,7 +12,6 @@ setup(
         "typer==0.15.2",
         "pydantic",
         "networkx",
-        "SQLAlchemy",
         "coloredlogs",
         "archinfo",
         "pyvex",
