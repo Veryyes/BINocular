@@ -1,31 +1,30 @@
 from __future__ import annotations
 
+import os
+import bisect
 import hashlib
 import logging
-import os
 import tempfile
-import bisect
+from pathlib import Path
 from collections import defaultdict
 from functools import cached_property
-from pathlib import Path
-from typing import IO, Any, Dict, List, Optional, Set, Type, Union, Tuple
+from typing import IO, Any, Set, Dict, List, Type, Tuple, Union
 
-import networkx as nx
 import pyvex
-from pydantic import BaseModel, computed_field, model_validator
-from pydantic.functional_serializers import PlainSerializer
-from pydantic.functional_validators import PlainValidator
+import networkx as nx
 from typing_extensions import Annotated
-
-from .consts import IL, BranchType, Endian, IndirectToken, RefType
+from pydantic.functional_validators import PlainValidator
+from pydantic.functional_serializers import PlainSerializer
+from pydantic import BaseModel, computed_field, model_validator
 
 from .source import C_Code
 from .utils import str2archinfo
+from .consts import IL, Endian, RefType, BranchType, IndirectToken
 
 logger = logging.getLogger(__file__)
 
 
-parsers: Dict[str, Optional[Type]] = defaultdict(lambda: None)
+parsers: Dict[str, Type | None] = defaultdict(lambda: None)
 parsers["C"] = C_Code
 
 
@@ -59,7 +58,7 @@ class Branch(BaseModel):
 
     type: BranchType
     """Type of Jump"""
-    target: Optional[int]
+    target: int | None
     """Address to Jump to"""
 
     def __hash__(self):
@@ -82,7 +81,7 @@ class Variable(BaseModel):
     name: str
     is_register: bool
     is_stack: bool
-    stack_offset: Optional[int] = 0
+    stack_offset: int | None = 0
 
 
 class Reference(BaseModel):
@@ -102,10 +101,10 @@ class Reference(BaseModel):
 class Argument(BaseModel):
     """Represents a single argument in a function"""
 
-    data_type: Optional[str] = None
+    data_type: str | None = None
     """Argument data type (e.g., char, int, short*, struct socket, long(*)(char*))"""
 
-    var_name: Optional[str] = None
+    var_name: str | None = None
     """Argument Variable Name"""
 
     var_args: bool = False
@@ -147,9 +146,9 @@ class Argument(BaseModel):
 class NativeCode(BaseModel):
     """A Base class to represent attributes of compiled code generally"""
 
-    endianness: Optional[Endian] = None
-    architecture: Optional[str] = None
-    bitness: Optional[int] = None
+    endianness: Endian | None = None
+    architecture: str | None = None
+    bitness: int | None = None
 
     def __repr__(self) -> str:
         fields = []
@@ -173,11 +172,11 @@ class NativeCode(BaseModel):
 class Instruction(NativeCode):
     """Represents a single instruction"""
 
-    address: Optional[int] = None
+    address: int | None = None
     data: Bytes
-    asm: Optional[str] = ""
-    comment: Optional[str] = ""
-    ir: Optional[IR] = None
+    asm: str | None = ""
+    comment: str | None = ""
+    ir: IR | None = None
 
     def __len__(self):
         return len(self.data)
@@ -211,17 +210,17 @@ class Instruction(NativeCode):
 class BasicBlock(NativeCode):
     """Represents a Basic Block"""
 
-    _function: Optional[NativeFunction] = None
+    _function: NativeFunction | None = None
 
-    address: Optional[int] = None
+    address: int | None = None
 
     instructions: List[Instruction] = list()
     branches: Set[Branch] = set()
-    is_prologue: Optional[bool] = False
-    is_epilogue: Optional[bool] = False
+    is_prologue: bool | None = False
+    is_epilogue: bool | None = False
     xrefs: Set[Reference] = set([])
 
-    _size_bytes: Optional[int] = None
+    _size_bytes: int | None = None
 
     class BasicBlockIterator:
         def __init__(self, block: BasicBlock):
@@ -299,7 +298,7 @@ class BasicBlock(NativeCode):
     def __repr__(self) -> str:
         return str(self)
 
-    def end(self) -> Optional[int]:
+    def end(self) -> int | None:
         if self.address is None:
             return None
         return self.address + len(self)
@@ -333,12 +332,12 @@ class NativeFunction(NativeCode):
 
     _ctxt: Any = None  # Reference to backing disassebler function context object
     _block_lookup: Dict[int, BasicBlock] = dict()
-    _binary: Optional[Binary] = None
+    _binary: Binary | None = None
 
-    address: Optional[int] = None
-    canary: Optional[bool] = None
-    names: Optional[List[str]] = None
-    return_type: Optional[str] = None
+    address: int | None = None
+    canary: bool | None = None
+    names: List[str] | None = None
+    return_type: str | None = None
     argv: List[Argument] = list()
     variables: List[Variable] = list()
     stack_frame_size: int = 0
@@ -518,12 +517,12 @@ class SourceFunction(BaseModel):
     lang: str = "C"
     name: str
     decompiled: bool
-    perfect_decomp: Optional[bool] = False
+    perfect_decomp: bool | None = False
     """True if the decompilation is exactly the true source code"""
 
     source: str
-    argv: Optional[List[Argument]] = list()
-    return_type: Optional[str] = ""
+    argv: List[Argument] | None = list()
+    return_type: str | None = ""
     qualifiers: Set[str] = set()
     """Function Qualifiers such as `const`, `volatile`, or `static`"""
 
@@ -613,9 +612,9 @@ class Binary(NativeCode):
     class NoDataException(Exception):
         pass
 
-    _path: Optional[Path] = None
-    _bytes: Optional[bytes] = None
-    _size: Optional[int] = None
+    _path: Path | None = None
+    _bytes: bytes | None = None
+    _size: int | None = None
 
     functions: Set[NativeFunction] = set()
     _func_sorted: List[NativeFunction] = list()
@@ -625,17 +624,17 @@ class Binary(NativeCode):
     _bbs_sorted: List[BasicBlock] = list()
     _instrs: Dict[int, Instruction] = dict()
 
-    filename: Optional[Union[str, List[str]]] = None
+    filename: str | List[str] | None = None
 
     names: List[str] = []
     """names this binary has gone by (multiple are possbile when loading data from a database)"""
 
-    entrypoint: Optional[int] = None
-    os: Optional[str] = None
+    entrypoint: int | None = None
+    os: str | None = None
     base_addr: int = 0
     dynamic_libs: Set[str] = set([])
-    compiler: Optional[str] = None
-    compilation_flags: Optional[str] = None
+    compiler: str | None = None
+    compilation_flags: str | None = None
 
     # Strings from String table if they exists, otherwise strings detected in the binary (like unix `strings`` command)
     strings: Set[str] = set([])
@@ -714,23 +713,23 @@ class Binary(NativeCode):
 
         raise Binary.NoDataException("Binary Object has no Path or data")
 
-    def function_at(self, address: int) -> Optional[NativeFunction]:
+    def function_at(self, address: int) -> NativeFunction | None:
         """Returns a Function at the address specified"""
         return self._func_addrs.get(address, None)
 
-    def function_sym(self, symbol: str) -> Optional[NativeFunction]:
+    def function_sym(self, symbol: str) -> NativeFunction | None:
         """Returns a Function with the given symbol names"""
         return self._func_names.get(symbol, None)
 
-    def basic_block(self, address: int) -> Optional[BasicBlock]:
+    def basic_block(self, address: int) -> BasicBlock | None:
         """Returns a basic block at the given address"""
         return self._bbs.get(address, None)
 
-    def instruction(self, address: int) -> Optional[Instruction]:
+    def instruction(self, address: int) -> Instruction | None:
         """Returns the instruction at the given address"""
         return self._instrs.get(address, None)
 
-    def function_containing(self, address: int) -> Optional[NativeFunction]:
+    def function_containing(self, address: int) -> NativeFunction | None:
         """Return the function which contains the given address"""
         idx = bisect.bisect_left(self._func_sorted, address)
         if idx >= len(self._func_sorted):
@@ -744,7 +743,7 @@ class Binary(NativeCode):
 
         return self._func_addrs[self._func_sorted[idx]]
 
-    def bb_containing(self, address: int) -> Optional[BasicBlock]:
+    def bb_containing(self, address: int) -> BasicBlock | None:
         """Return the basicblock containing the given address"""
         idx = bisect.bisect_left(self._bbs_sorted, address)
 

@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 import os
+import time
 import socket
 import struct
-import subprocess
-import threading
-import time
-from collections.abc import Iterable
-from enum import Enum
-from typing import Any, List, Optional, Tuple
 import pathlib
-
-
-from .core import GhidraBase
+import threading
+import subprocess
+from enum import Enum
+from typing import Any, List, Tuple
+from collections.abc import Iterable
 
 from .. import logger
-from ..consts import IL, BranchType, Endian, RefType
-from ..primitives import IR, Argument, Branch, Instruction, Reference, Variable
+from .core import GhidraBase
+from ..consts import IL, Endian, RefType, BranchType
+from ..primitives import IR, Branch, Argument, Variable, Reference, Instruction
 
 
 class PipeRPCNotOpened(Exception):
@@ -77,14 +75,14 @@ class PipeRPC:
         self.sock: socket.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.is_connected: bool = False
         self.timeout: int = timeout
-        self.proc: Optional[subprocess.Popen] = None
+        self.proc: subprocess.Popen | None = None
 
     def connect(self) -> bool:
         if self.proc is None or self.proc.poll() is not None:
             self.is_connected = False
             return False
 
-        assert self.proc.poll() == None
+        assert self.proc.poll() is None
         logger.info(f"Attempting to Connect to: {self.unix_socket}")
         waited = 0.0
         while not self.is_connected:
@@ -144,16 +142,16 @@ class PipeRPC:
         res_id, size = struct.unpack(PipeRPC.RESFMT, header)
         if res_id != id + 1:
             raise Exception(
-                f"Receive unexpected response id: {res_id}, Expected: {id+1}"
+                f"Receive unexpected response id: {res_id}, Expected: {id + 1}"
             )
 
         if size < 0:
-            raise Exception(f"Receive negative lengthed response")
+            raise Exception("Receive negative lengthed response")
 
         if size > 0:
             res = self._recv_bytes(self.sock, size, timeout=self.timeout)
             logger.debug(
-                f"Receive {PipeRPC.Command(res_id-1).name} Response in {time.time()-start:2f}s"
+                f"Receive {PipeRPC.Command(res_id - 1).name} Response in {time.time() - start:2f}s"
             )
             return res
 
@@ -175,7 +173,7 @@ class PipeRPC:
 class ProcMon(threading.Thread):
     def __init__(self, chunk_len: int = 2048, verbose: bool = False):
         super().__init__()
-        self.proc: Optional[subprocess.Popen] = None
+        self.proc: subprocess.Popen | None = None
         self.verbose: bool = verbose
         self.running: bool = False
         self.stdout: str = ""
@@ -212,20 +210,20 @@ class GhidraLegacy(GhidraBase):
         self,
         filepath: pathlib.Path | str,
         verbose: bool = True,
-        project_path: Optional[str] = None,
-        home: Optional[str] = None,
+        project_path: str | None = None,
+        home: str | None = None,
         cpus: int = 1,
-        analysis_timeout: Optional[int] = None,
+        analysis_timeout: int | None = None,
     ):
         super().__init__(
             filepath=filepath, verbose=verbose, project_path=project_path, home=home
         )
         self.cpus: int = cpus
-        self.ghidra_proc: Optional[subprocess.Popen] = None
+        self.ghidra_proc: subprocess.Popen | None = None
         self.unix_socket: str = os.path.join("/tmp", f"binocular_ghidra_{os.getpid()}")
-        self.rpc_pipe: Optional[PipeRPC] = None
-        self.proc_monitor: Optional[ProcMon] = None
-        self.anal_time: Optional[int] = analysis_timeout
+        self.rpc_pipe: PipeRPC | None = None
+        self.proc_monitor: ProcMon | None = None
+        self.anal_time: int | None = analysis_timeout
 
     def analysis_timeout(self, bin_size) -> int:
         # 30s +
@@ -540,7 +538,7 @@ class GhidraLegacy(GhidraBase):
             self.rpc_pipe.request(PipeRPC.Command.FUNC_IS_THUNK, f_addr=addr)[0]
         )
 
-    def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
+    def get_func_decomp(self, addr: int, func_ctxt: Any) -> str | None:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -649,9 +647,7 @@ class GhidraLegacy(GhidraBase):
 
         return instr
 
-    def get_ir_from_instruction(
-        self, instr_addr: int, instr: Instruction
-    ) -> Optional[IR]:
+    def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> IR | None:
         """
         Returns the Intermediate Representation data based on the instruction given
         """
@@ -664,7 +660,7 @@ class GhidraLegacy(GhidraBase):
         )
         return IR(lang_name=IL.PCODE, data=pcode)
 
-    def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
+    def get_instruction_comment(self, instr_addr: int) -> str | None:
         """Return comments at the instruction"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -678,9 +674,9 @@ class GhidraLegacy(GhidraBase):
         self,
         script: str,
         timeout: int,
-        script_args: Optional[List[str]] = None,
-        script_path: Optional[str] = None,
-    ) -> Optional[str]:
+        script_args: List[str] | None = None,
+        script_path: str | None = None,
+    ) -> str | None:
         """Run a custom script"""
         curr_script_path = (
             os.path.join(self.SCRIPT_PATH(), script)

@@ -3,26 +3,26 @@ from __future__ import annotations
 import posixpath
 import subprocess
 from collections import defaultdict
-from typing import Dict, List, Tuple, Type, Optional
+from typing import Dict, List, Type, Tuple
 from urllib.parse import unquote, urlsplit
 
 from archinfo import (
-    ArchAArch64,
-    ArchAMD64,
     ArchARM,
-    ArchARMCortexM,
+    ArchX86,
+    ArchAVR8,
+    ArchSoot,
+    ArchAMD64,
     ArchARMEL,
     ArchARMHF,
-    ArchAVR8,
-    ArchMIPS32,
-    ArchMIPS64,
-    ArchNotFound,
     ArchPPC32,
     ArchPPC64,
-    ArchRISCV64,
     ArchS390X,
-    ArchSoot,
-    ArchX86,
+    ArchMIPS32,
+    ArchMIPS64,
+    ArchAArch64,
+    ArchRISCV64,
+    ArchNotFound,
+    ArchARMCortexM,
 )
 
 arches: List[Type] = [
@@ -58,7 +58,7 @@ for a in arches:
 
 
 def run_proc(
-    cmd: List[str], timeout: Optional[int] = 15, stdin=False, cwd="."
+    cmd: List[str], timeout: int | None = 15, stdin=False, cwd="."
 ) -> Tuple[str, str]:
     if stdin:
         stdin = subprocess.PIPE

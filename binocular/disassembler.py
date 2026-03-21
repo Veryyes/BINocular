@@ -1,29 +1,29 @@
 from __future__ import annotations
 
 import os
+import types
 import string
 import pathlib
-import typing_extensions
-import types
 import functools
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any, List, Optional, Set, Tuple, Type
+from typing import Any, Set, List, Type, Tuple
 
+import typing_extensions
 
 from . import logger
 from .consts import Endian
 from .primitives import (
     IR,
-    Argument,
-    BasicBlock,
     Binary,
     Branch,
+    Argument,
+    Variable,
+    Reference,
+    BasicBlock,
     Instruction,
     NativeFunction,
-    Reference,
     SourceFunction,
-    Variable,
 )
 
 
@@ -47,14 +47,14 @@ class Disassembler(ABC):
 
         def __init__(self):
             super().__init__(
-                f"Disassembler has not been opened with a binary yet. Call open() or use a Context Manager"
+                "Disassembler has not been opened with a binary yet. Call open() or use a Context Manager"
             )
 
     class AnalyzeNotRunError(NotOpenedError):
         """Raised when Diassembler.analyze() needs to be called first in order for the function to work properly"""
 
         def __init__(self):
-            super().__init__(f"analyzer() must be run first")
+            super().__init__("analyzer() must be run first")
 
     def __init__(self, filepath: pathlib.Path | str, verbose: bool = True):
         self.verbose: bool = verbose
@@ -127,7 +127,7 @@ class Disassembler(ABC):
         """Returns the name of the binary loaded"""
         return self.binary_filepath.name
 
-    def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
+    def get_func_decomp(self, addr: int, func_ctxt: Any) -> str | None:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         return None
 
@@ -135,15 +135,13 @@ class Disassembler(ABC):
         """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
         return list()
 
-    def get_ir_from_instruction(
-        self, instr_addr: int, instr: Instruction
-    ) -> Optional[IR]:
+    def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> IR | None:
         """
         Returns a list of Intermediate Representation data based on the instruction given
         """
         return instr.vex()
 
-    def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
+    def get_instruction_comment(self, instr_addr: int) -> str | None:
         """Return comments at the instruction"""
         return None
 
@@ -167,10 +165,10 @@ class Disassembler(ABC):
     @abstractmethod
     def install(
         cls,
-        version: Optional[str] = None,
-        install_dir: Optional[str] = None,
-        build: Optional[bool] = False,
-        local_install_file: Optional[str] = None,
+        version: str | None = None,
+        install_dir: str | None = None,
+        build: bool | None = False,
+        local_install_file: str | None = None,
     ) -> str | None:
         """
         Installs the disassembler to a user specified directory or within the python module if none is specified

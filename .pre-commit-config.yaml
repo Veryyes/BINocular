@@ -1,10 +1,12 @@
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0  # Change this to the latest version
+    rev: v1.19.1  # Change this to the latest version
     hooks:
       - id: mypy
-
-  - repo: https://github.com/psf/black
-    rev: stable
-    hooks:
-    - id: black

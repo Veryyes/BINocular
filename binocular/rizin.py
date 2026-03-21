@@ -1,34 +1,33 @@
 from __future__ import annotations
 
-import binascii
+import os
 import json
 import lzma
-import os
-import pkgutil
 import shutil
-import tarfile
-import tempfile
 import pathlib
-import typing_extensions
-from collections import OrderedDict, defaultdict
-from collections.abc import Iterable
-from typing import IO, Any, Union, Dict, List, Optional, Set, Tuple
+import pkgutil
+import tarfile
+import binascii
+import tempfile
 from urllib.request import urlopen
+from collections.abc import Iterable
+from collections import OrderedDict, defaultdict
+from typing import Any, Set, Dict, List, Tuple, Union
 
 import git
-import requests  # type: ignore[import-untyped]
 import rzpipe
 from git import Repo
+import typing_extensions
+import requests  # type: ignore[import-untyped]
 
 from . import logger
-from .consts import IL, BranchType, Endian
-from .disassembler import Disassembler
-from .primitives import IR, Argument, Branch, Instruction, Reference, RefType, Variable
 from .utils import run_proc
+from .disassembler import Disassembler
+from .consts import IL, Endian, BranchType
+from .primitives import IR, Branch, RefType, Argument, Variable, Reference, Instruction
 
 
 class Rizin(Disassembler):
-
     GIT_REPO = "https://github.com/rizinorg/rizin.git"
     GITHUB_API = "https://api.github.com/repos/rizinorg/rizin/releases"
 
@@ -73,10 +72,10 @@ class Rizin(Disassembler):
     @classmethod
     def install(
         cls,
-        version: Optional[str] = None,
-        install_dir: Optional[str] = None,
-        build: Optional[bool] = False,
-        local_install_file: Optional[str] = None,
+        version: str | None = None,
+        install_dir: str | None = None,
+        build: bool | None = False,
+        local_install_file: str | None = None,
     ) -> str:
         """Installs the disassembler to a user specified directory or within the python module if none is specified"""
         logger.info("Installing Rizin")
@@ -160,13 +159,13 @@ class Rizin(Disassembler):
         self,
         filepath: pathlib.Path | str,
         verbose: bool = True,
-        home: Optional[str] = None,
+        home: str | None = None,
     ) -> None:
         super().__init__(filepath=filepath, verbose=verbose)
-        self.rizin_home: Optional[str] = home
-        self._pipe: Optional[rzpipe.open] = None
+        self.rizin_home: str | None = home
+        self._pipe: rzpipe.open | None = None
 
-        self._bin_info: Optional[Dict[str, Any]] = None
+        self._bin_info: Dict[str, Any] | None = None
         self._thunk_dict: Dict[int, bool] = dict()
         self._caller_cache: defaultdict[int, Set] = defaultdict(lambda: set())
         self._calls_cache: defaultdict[int, Set] = defaultdict(lambda: set())
@@ -261,7 +260,7 @@ class Rizin(Disassembler):
 
     def get_dynamic_libs(self) -> Iterable[str]:
         """Returns the list of names of the dynamic libraries used in this binary"""
-        return [l for l in self.pipe.cmdj("ilj")]
+        return [lib for lib in self.pipe.cmdj("ilj")]
 
     def get_func_iterator(self) -> Iterable[Any]:
         """
@@ -378,7 +377,7 @@ class Rizin(Disassembler):
         """Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk"""
         return self._thunk_dict.get(addr, False)
 
-    def get_func_decomp(self, addr: int, func_ctxt: Any) -> Optional[str]:
+    def get_func_decomp(self, addr: int, func_ctxt: Any) -> str | None:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         return None
 
@@ -432,7 +431,7 @@ class Rizin(Disassembler):
             addr = i["offset"]
 
             self.pipe.cmd(f"s {addr}")
-            instr_data: Dict[str, Union[int, str]] = self.pipe.cmdj(f"pdj 1")[0]
+            instr_data: Dict[str, Union[int, str]] = self.pipe.cmdj("pdj 1")[0]
 
             instr_bytes = str(instr_data["bytes"])
             disasm = str(instr_data.get("disasm", ""))
@@ -441,24 +440,22 @@ class Rizin(Disassembler):
 
         return instrs
 
-    def get_ir_from_instruction(
-        self, instr_addr: int, instr: Instruction
-    ) -> Optional[IR]:
+    def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> IR | None:
         """
         Returns the Intermediate Representation data based on the instruction given
         """
         self.pipe.cmd(f"s {instr_addr}")
-        instr_data = self.pipe.cmdj(f"pdj 1")[0]
+        instr_data = self.pipe.cmdj("pdj 1")[0]
         ir = instr_data.get("esil", None)
         if ir is not None and len(ir) > 0:
             return IR(lang_name=IL.ESIL, data=ir)
 
         return None
 
-    def get_instruction_comment(self, instr_addr: int) -> Optional[str]:
+    def get_instruction_comment(self, instr_addr: int) -> str | None:
         """Return comments at the instruction"""
         self.pipe.cmd(f"s {instr_addr}")
-        instr_data = self.pipe.cmdj(f"pdj 1")[0]
+        instr_data = self.pipe.cmdj("pdj 1")[0]
 
         if instr_data.get("comment", None) is not None:
             return str(binascii.a2b_base64(instr_data["comment"]), "utf8")

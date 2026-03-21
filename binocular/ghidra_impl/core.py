@@ -1,27 +1,27 @@
 from __future__ import annotations
 
-import json
 import os
-import pkgutil
 import re
+import json
 import shutil
 import struct
-import tempfile
-import zipfile
 import hashlib
-import typing_extensions
 import pathlib
-from collections import OrderedDict
-from typing import Any, Optional
+import pkgutil
+import zipfile
+import tempfile
+from typing import Any
 from urllib.request import urlopen
+from collections import OrderedDict
 
 import git
-import requests  # type: ignore[import-untyped]
 from git import Repo
+import typing_extensions
+import requests  # type: ignore[import-untyped]
 
-from ..disassembler import Disassembler
-from ..utils import run_proc
 from .. import logger
+from ..utils import run_proc
+from ..disassembler import Disassembler
 
 
 def gzf_project_name(gzf_path: pathlib.Path) -> str | None:
@@ -80,9 +80,9 @@ class GhidraBase(Disassembler):
     @classmethod
     def _install_prebuilt(
         cls,
-        version: Optional[str],
+        version: str | None,
         install_dir: str,
-        local_install_file: Optional[str] = None,
+        local_install_file: str | None = None,
     ) -> str | None:
         if local_install_file is None:
             # Ask Github API for Ghidra Release versions and the
@@ -143,14 +143,13 @@ class GhidraBase(Disassembler):
 
         home = os.path.join(install_dir, os.listdir(install_dir)[0])
         if not os.path.exists(home):
-            logger.error(f"Failed to find expected Ghidra installation")
+            logger.error("Failed to find expected Ghidra installation")
             return None
 
         return home
 
     @classmethod
     def _build(cls, version: str, install_dir: str) -> str | None:
-
         logger.info(f"Building Ghidra @ commit {version}")
 
         # dependency check
@@ -218,7 +217,7 @@ class GhidraBase(Disassembler):
 
         home = os.path.join(dist, "_".join(os.path.basename(zip_file).split("_")[:3]))
         if not os.path.exists(home):
-            logger.error(f"Failed to find expected Ghidra installation")
+            logger.error("Failed to find expected Ghidra installation")
             return None
 
         return home
@@ -244,7 +243,7 @@ class GhidraBase(Disassembler):
 
         if build:
             if version is None:
-                logger.error(f"`version` must be a commmit hash if `build=true`")
+                logger.error("`version` must be a commmit hash if `build=true`")
                 return None
 
             ghidra_home = GhidraBase._build(version, install_dir)
@@ -273,7 +272,7 @@ class GhidraBase(Disassembler):
         return ghidra_home
 
     @classmethod
-    def is_installed(cls, install_dir: Optional[str] = None) -> bool:
+    def is_installed(cls, install_dir: str | None = None) -> bool:
         """Returns Boolean on whether or not the dissassembler is installed"""
         os.makedirs(GhidraBase.DEFAULT_INSTALL(), exist_ok=True)
 
@@ -294,8 +293,8 @@ class GhidraBase(Disassembler):
         self,
         filepath: pathlib.Path | str,
         verbose: bool = True,
-        project_path: Optional[str] = None,
-        home: Optional[str] = None,
+        project_path: str | None = None,
+        home: str | None = None,
     ):
         super().__init__(filepath=filepath, verbose=verbose)
 
