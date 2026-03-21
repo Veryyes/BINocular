@@ -242,9 +242,10 @@ class Ghidra(GhidraBase):
 
         return dyn_libs
 
+    @typing_extensions.override
     def get_func_iterator(
         self,
-    ) -> typing.Iterable["ghidra.program.database.function.FunctionDB"]:
+    ) -> typing.Iterable[ghidra.program.model.listing.Function]:
         """
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data)
         needed to construct a `Function` object for all functions in the binary.
@@ -254,16 +255,22 @@ class Ghidra(GhidraBase):
         for f in self.func_manager.getFunctions(True):
             yield f
 
-    def get_func_addr(self, func_ctxt: typing.Any) -> int:
+    @typing_extensions.override
+    def get_func_addr(self, func_ctxt: ghidra.program.model.listing.Function) -> int:
         """Returns the address of the function corresponding to the function information returned from `get_func_iterator()`"""
         return func_ctxt.getEntryPoint().getOffset()
 
-    def get_func_name(self, addr: int, func_ctxt: typing.Any) -> str:
+    @typing_extensions.override
+    def get_func_name(
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> str:
         """Returns the name of the function corresponding to the function information returned from `get_func_iterator()`"""
         return func_ctxt.getName()
 
     @functools.lru_cache
-    def _decompile(self, func_ctxt: typing.Any):
+    def _decompile(
+        self, func_ctxt: ghidra.program.model.listing.Function
+    ) -> ghidra.app.decompiler.DecompileResults:
         """Return DecompileResult object. lru_cache'd because it's a little expensive"""
         res = self.decomp.decompileFunction(
             func_ctxt, self.decomp_timeout, self.monitor
@@ -275,7 +282,10 @@ class Ghidra(GhidraBase):
 
         return res
 
-    def get_func_args(self, addr: int, func_ctxt: typing.Any) -> typing.List[Argument]:
+    @typing_extensions.override
+    def get_func_args(
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> typing.List[Argument]:
         """Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`"""
         decomp_res = self._decompile(func_ctxt)
         high_func = decomp_res.getHighFunction()
@@ -297,7 +307,10 @@ class Ghidra(GhidraBase):
 
         return args
 
-    def get_func_return_type(self, addr: int, func_ctxt: typing.Any) -> str:
+    @typing_extensions.override
+    def get_func_return_type(
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> str:
         """Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`"""
         decomp_res = self._decompile(func_ctxt)
         high_func = decomp_res.getHighFunction()
@@ -307,13 +320,17 @@ class Ghidra(GhidraBase):
 
         return str(proto.getReturnType())
 
-    def get_func_stack_frame_size(self, addr: int, func_ctxt: typing.Any) -> int:
+    @typing_extensions.override
+    def get_func_stack_frame_size(
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> int:
         """Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`"""
         sf = func_ctxt.getStackFrame()
         return sf.getFrameSize()
 
+    @typing_extensions.override
     def get_func_vars(
-        self, addr: int, func_ctxt: typing.Any
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
     ) -> typing.Iterable[Variable]:
         """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
         vars = list()
@@ -329,11 +346,17 @@ class Ghidra(GhidraBase):
             vars.append(v)
         return vars
 
-    def is_func_thunk(self, addr: int, func_ctxt: typing.Any) -> bool:
+    @typing_extensions.override
+    def is_func_thunk(
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> bool:
         """Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk"""
         return func_ctxt.isThunk()
 
-    def get_func_decomp(self, addr: int, func_ctxt: typing.Any) -> str | None:
+    @typing_extensions.override
+    def get_func_decomp(
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> str | None:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         decomp_res = self._decompile(func_ctxt)
         dfunc = decomp_res.getDecompiledFunction()
@@ -342,8 +365,9 @@ class Ghidra(GhidraBase):
 
         return dfunc.getC()
 
+    @typing_extensions.override
     def get_func_callers(
-        self, addr: int, func_ctxt: typing.Any
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
     ) -> typing.Iterable[int]:
         refs = self.ref_manager.getReferencesTo(self._mk_addr(addr))
         for ref in refs:
@@ -353,8 +377,9 @@ class Ghidra(GhidraBase):
                 if caller is not None:
                     yield caller.getEntryPoint().getOffset()
 
+    @typing_extensions.override
     def get_func_callees(
-        self, addr: int, func_ctxt: typing.Any
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
     ) -> typing.Iterable[int]:
         for addr in func_ctxt.getBody().getAddresses(True):
             refs = self.ref_manager.getReferencesFrom(addr)
@@ -362,7 +387,7 @@ class Ghidra(GhidraBase):
                 if ref.getReferenceType().isCall():
                     yield ref.getToAddress().getOffset()
 
-    def _parse_ref_type(self, type):
+    def _parse_ref_type(self, type: ghidra.program.model.symbol.RefType) -> RefType:
         if type.isCall():
             return RefType.CALL
         if type.isJump():
@@ -374,12 +399,15 @@ class Ghidra(GhidraBase):
 
         return RefType.UNKNOWN
 
+    @typing_extensions.override
     def get_func_xrefs(
-        self, addr: int, func_ctxt: typing.Any
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
     ) -> typing.Iterable[Reference]:
         for addr in func_ctxt.getBody().getAddresses(True):
             from_refs = self.ref_manager.getReferencesFrom(addr)
             for ref in from_refs:
+                # mypy unable to infer the item type in a java iterator; manually casting type
+
                 ref_type = ref.getReferenceType()
                 yield Reference(
                     from_=ref.getFromAddress().getOffset(),
@@ -387,8 +415,13 @@ class Ghidra(GhidraBase):
                     type=self._parse_ref_type(ref_type),
                 )
 
-            to_refs = self.ref_manager.getReferencesTo(addr)
+            # NOTE: VSCode's python plugin cant seem to infer the type here, but mypy can. Manually typing
+            to_refs: ghidra.program.model.symbol.ReferenceIterator = (
+                self.ref_manager.getReferencesTo(addr)
+            )
             for ref in to_refs:
+                # NOTE same deal as the note above
+                ref = typing.cast(ghidra.program.model.symbol.Reference, ref)
                 ref_type = ref.getReferenceType()
                 yield Reference(
                     from_=ref.getFromAddress().getOffset(),
@@ -396,9 +429,10 @@ class Ghidra(GhidraBase):
                     type=self._parse_ref_type(ref_type),
                 )
 
+    @typing_extensions.override
     def get_func_bb_iterator(
-        self, addr: int, func_ctxt: typing.Any
-    ) -> typing.Iterable[typing.Any]:
+        self, addr: int, func_ctxt: ghidra.program.model.listing.Function
+    ) -> typing.Iterable[ghidra.program.model.block.CodeBlock]:
         """
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
         needed to construct a `BasicBlock` object for all basic blocks in the function based on function information returned from `get_func_iterator()`.
@@ -411,7 +445,9 @@ class Ghidra(GhidraBase):
         history = set()
 
         while blocks.hasNext():
-            bb = blocks.next()
+            # NOTE: VSCode's python plugin can't seem to figure out the typing for jpype hasNext() and next() functions
+            # mypy is cool with it though
+            bb = typing.cast(ghidra.program.model.block.CodeBlock, blocks.next())
             bb_addr = bb.getFirstStartAddress().getOffset()
 
             if bb_addr in history:
@@ -420,14 +456,24 @@ class Ghidra(GhidraBase):
             history.add(bb_addr)
             yield bb
 
-    def get_bb_addr(self, bb_ctxt: typing.Any, func_ctxt: typing.Any) -> int:
+    @typing_extensions.override
+    def get_bb_addr(
+        self,
+        bb_ctxt: ghidra.program.model.block.CodeBlock,
+        func_ctxt: ghidra.program.model.listing.Function,
+    ) -> int:
         """
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
         return bb_ctxt.getFirstStartAddress().getOffset()
 
+    @typing_extensions.override
     def get_next_bbs(
-        self, bb_addr: int, bb_ctxt: typing.Any, func_addr: int, func_ctxt: typing.Any
+        self,
+        bb_addr: int,
+        bb_ctxt: ghidra.program.model.block.CodeBlock,
+        func_addr: int,
+        func_ctxt: ghidra.program.model.listing.Function,
     ) -> typing.Iterable[Branch]:
         """
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
@@ -447,8 +493,12 @@ class Ghidra(GhidraBase):
                 elif flow_type.isComputed():
                     yield Branch(type=BranchType.IndirectBranch, target=None)
 
+    @typing_extensions.override
     def get_bb_instructions(
-        self, bb_addr: int, bb_ctxt: typing.Any, func_ctxt: typing.Any
+        self,
+        bb_addr: int,
+        bb_ctxt: ghidra.program.model.block.CodeBlock,
+        func_ctxt: ghidra.program.model.listing.Function,
     ) -> typing.List[typing.Tuple[bytes, str]]:
         """
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.

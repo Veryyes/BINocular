@@ -13,6 +13,7 @@ from urllib.request import urlopen
 from collections.abc import Iterable
 from collections import OrderedDict, defaultdict
 from typing import Any, Set, Dict, List, Tuple, Union
+from typing_extensions import override
 
 import git
 import rzpipe
@@ -155,6 +156,10 @@ class Rizin(Disassembler):
         logger.info("Rizin Install Completed")
         return install_dir
 
+    @classmethod
+    def IL(cls) -> IL:
+        return IL.ESIL
+
     def __init__(
         self,
         filepath: pathlib.Path | str,
@@ -262,7 +267,8 @@ class Rizin(Disassembler):
         """Returns the list of names of the dynamic libraries used in this binary"""
         return [lib for lib in self.pipe.cmdj("ilj")]
 
-    def get_func_iterator(self) -> Iterable[Any]:
+    @override
+    def get_func_iterator(self) -> Iterable[Dict[str, Any]]:
         """
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data)
         needed to construct a `Function` object for all functions in the binary.
@@ -272,11 +278,13 @@ class Rizin(Disassembler):
         for f in self.pipe.cmdj("aflj"):
             yield f
 
-    def get_func_addr(self, func_ctxt: Any) -> int:
+    @override
+    def get_func_addr(self, func_ctxt: Dict[str, Any]) -> int:
         """Returns the address of the function corresponding to the function information returned from `get_func_iterator()`"""
         return func_ctxt["offset"]
 
-    def get_func_name(self, addr: int, func_ctxt: Any) -> str:
+    @override
+    def get_func_name(self, addr: int, func_ctxt: Dict[str, Any]) -> str:
         """Returns the name of the function corresponding to the function information returned from `get_func_iterator()`"""
         self.pipe.cmd(f"s {addr}")
         signature = self.pipe.cmdj("afsj")
@@ -294,7 +302,8 @@ class Rizin(Disassembler):
 
         return name
 
-    def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
+    @override
+    def get_func_args(self, addr: int, func_ctxt: Dict[str, Any]) -> List[Argument]:
         """Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`"""
         self.pipe.cmd(f"s {addr}")
         signature = self.pipe.cmdj("afsj")
@@ -304,12 +313,14 @@ class Rizin(Disassembler):
             if arg.get("type", None) and arg.get("name", None)
         ]
 
-    def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+    @override
+    def get_func_callers(self, addr: int, func_ctxt: Dict[str, Any]) -> Iterable[int]:
         """Return the address to functions that call func_ctxt"""
         for call_addr in self._caller_cache[addr]:
             yield call_addr
 
-    def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+    @override
+    def get_func_callees(self, addr: int, func_ctxt: Dict[str, Any]) -> Iterable[int]:
         """Return the address to functions that are called in func_ctxt"""
         for callee_addr in self._calls_cache[addr]:
             yield callee_addr
@@ -324,7 +335,10 @@ class Rizin(Disassembler):
 
         return RefType.UNKNOWN
 
-    def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
+    @override
+    def get_func_xrefs(
+        self, addr: int, func_ctxt: Dict[str, Any]
+    ) -> Iterable[Reference]:
         self.pipe.cmd(f"s {addr}")
         xref_data = self.pipe.cmdj("afxj")
         for xref in xref_data:
@@ -338,19 +352,22 @@ class Rizin(Disassembler):
                 type=self._parse_xref_type(xref["type"]),
             )
 
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
+    @override
+    def get_func_return_type(self, addr: int, func_ctxt: Dict[str, Any]) -> str:
         """Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`"""
         self.pipe.cmd(f"s {addr}")
         signature = self.pipe.cmdj("afsj")
 
         return signature["ret"]
 
-    def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
+    @override
+    def get_func_stack_frame_size(self, addr: int, func_ctxt: Dict[str, Any]) -> int:
         """Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`"""
         self.pipe.cmd(f"s {addr}")
         return self.pipe.cmdj("afij")[0]["stackframe"]
 
-    def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
+    @override
+    def get_func_vars(self, addr: int, func_ctxt: Dict[str, Any]) -> Iterable[Variable]:
         """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
         self.pipe.cmd(f"s {addr}")
         vars: List[Variable] = list()
@@ -373,15 +390,20 @@ class Rizin(Disassembler):
 
         return vars
 
-    def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
+    @override
+    def is_func_thunk(self, addr: int, func_ctxt: Dict[str, Any]) -> bool:
         """Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk"""
         return self._thunk_dict.get(addr, False)
 
-    def get_func_decomp(self, addr: int, func_ctxt: Any) -> str | None:
+    @override
+    def get_func_decomp(self, addr: int, func_ctxt: Dict[str, Any]) -> str | None:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         return None
 
-    def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
+    @override
+    def get_func_bb_iterator(
+        self, addr: int, func_ctxt: Dict[str, Any]
+    ) -> Iterable[Dict[str, Any]]:
         """
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
         needed to construct a `BasicBlock` object for all basic blocks in the function based on function information returned from `get_func_iterator()`.
@@ -392,14 +414,20 @@ class Rizin(Disassembler):
         for bb in self.pipe.cmdj("afbj"):
             yield bb
 
-    def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
+    @override
+    def get_bb_addr(self, bb_ctxt: Dict[str, Any], func_ctxt: Dict[str, Any]) -> int:
         """
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
         return bb_ctxt["addr"]
 
+    @override
     def get_next_bbs(
-        self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any
+        self,
+        bb_addr: int,
+        bb_ctxt: Dict[str, Any],
+        func_addr: int,
+        func_ctxt: Dict[str, Any],
     ) -> Iterable[Branch]:
         """
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
@@ -418,8 +446,9 @@ class Rizin(Disassembler):
 
         return branches
 
+    @override
     def get_bb_instructions(
-        self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any
+        self, bb_addr: int, bb_ctxt: Dict[str, Any], func_ctxt: Dict[str, Any]
     ) -> List[Tuple[bytes, str]]:
         """
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.

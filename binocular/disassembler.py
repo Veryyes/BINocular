@@ -15,6 +15,7 @@ from . import logger
 from .consts import Endian
 from .primitives import (
     IR,
+    IL,
     Binary,
     Branch,
     Argument,
@@ -105,6 +106,10 @@ class Disassembler(ABC):
     def list_versions(cls) -> List[str]:
         """List installable verions of this disassembler"""
         return list()
+
+    @classmethod
+    def IL(cls) -> IL:
+        return IL.UNK
 
     def open(self) -> typing_extensions.Self:
         """Open up any resources"""

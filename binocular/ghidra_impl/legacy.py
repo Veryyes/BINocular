@@ -8,7 +8,8 @@ import pathlib
 import threading
 import subprocess
 from enum import Enum
-from typing import Any, List, Tuple
+from typing import List, Tuple
+from typing_extensions import override
 from collections.abc import Iterable
 
 from .. import logger
@@ -463,12 +464,14 @@ class GhidraLegacy(GhidraBase):
 
             yield f
 
+    @override
     def get_func_addr(self, func_ctxt: int) -> int:
         """Returns the address of the function corresponding to the function information returned from `get_func_iterator()`"""
         # Here, func_ctxt is the address
         return func_ctxt
 
-    def get_func_name(self, addr: int, func_ctxt: Any) -> str:
+    @override
+    def get_func_name(self, addr: int, func_ctxt: int) -> str:
         """Returns the name of the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -477,7 +480,8 @@ class GhidraLegacy(GhidraBase):
             self.rpc_pipe.request(PipeRPC.Command.FUNC_NAME, f_addr=addr), "utf8"
         )
 
-    def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
+    @override
+    def get_func_args(self, addr: int, func_ctxt: int) -> List[Argument]:
         """Returns the arguments in the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -487,7 +491,8 @@ class GhidraLegacy(GhidraBase):
         )
         return [Argument.from_literal(s) for s in args_str]
 
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
+    @override
+    def get_func_return_type(self, addr: int, func_ctxt: int) -> str:
         """Returns the return type of the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -496,7 +501,8 @@ class GhidraLegacy(GhidraBase):
             self.rpc_pipe.request(PipeRPC.Command.FUNC_RETURN, f_addr=addr), "utf8"
         )
 
-    def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
+    @override
+    def get_func_stack_frame_size(self, addr: int, func_ctxt: int) -> int:
         """Returns the size of the stack frame in the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -505,7 +511,8 @@ class GhidraLegacy(GhidraBase):
             "!I", self.rpc_pipe.request(PipeRPC.Command.FUNC_STACK_FRAME, f_addr=addr)
         )[0]
 
-    def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
+    @override
+    def get_func_vars(self, addr: int, func_ctxt: int) -> Iterable[Variable]:
         """Return variables within the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -529,7 +536,8 @@ class GhidraLegacy(GhidraBase):
 
             curr = curr + 4 + size
 
-    def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
+    @override
+    def is_func_thunk(self, addr: int, func_ctxt: int) -> bool:
         """Returns True if the function corresponding to the function information returned from `get_func_iterator()` is a thunk"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
@@ -538,14 +546,16 @@ class GhidraLegacy(GhidraBase):
             self.rpc_pipe.request(PipeRPC.Command.FUNC_IS_THUNK, f_addr=addr)[0]
         )
 
-    def get_func_decomp(self, addr: int, func_ctxt: Any) -> str | None:
+    @override
+    def get_func_decomp(self, addr: int, func_ctxt: int) -> str | None:
         """Returns the decomplication of the function corresponding to the function information returned from `get_func_iterator()`"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
 
         return str(self.rpc_pipe.request(PipeRPC.Command.DECOMP, f_addr=addr), "utf8")
 
-    def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+    @override
+    def get_func_callers(self, addr: int, func_ctxt: int) -> Iterable[int]:
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
 
@@ -554,7 +564,8 @@ class GhidraLegacy(GhidraBase):
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
-    def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+    @override
+    def get_func_callees(self, addr: int, func_ctxt: int) -> Iterable[int]:
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
 
@@ -563,7 +574,8 @@ class GhidraLegacy(GhidraBase):
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
-    def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
+    @override
+    def get_func_xrefs(self, addr: int, func_ctxt: int) -> Iterable[Reference]:
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
 
@@ -576,7 +588,8 @@ class GhidraLegacy(GhidraBase):
             )
             yield Reference(from_=from_, type=RefType(type_), to=to)
 
-    def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
+    @override
+    def get_func_bb_iterator(self, addr: int, func_ctxt: int) -> Iterable[int]:
         """
         Returns an iterator of `Any` data type (e.g., address, implementation specific basic block information, dict of data)
         needed to construct a `BasicBlock` object for all basic blocks in the function based on function information returned from `get_func_iterator()`.
@@ -591,14 +604,16 @@ class GhidraLegacy(GhidraBase):
         fmt = f"!{num_funcs}Q"
         return struct.unpack(fmt, raw)
 
-    def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
+    @override
+    def get_bb_addr(self, bb_ctxt: int, func_ctxt: int) -> int:
         """
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
         return bb_ctxt
 
+    @override
     def get_next_bbs(
-        self, bb_addr: int, bb_ctxt: Any, func_addr: int, func_ctxt: Any
+        self, bb_addr: int, bb_ctxt: int, func_addr: int, func_ctxt: int
     ) -> Iterable[Branch]:
         """
         Returns the Branching information of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
@@ -615,8 +630,9 @@ class GhidraLegacy(GhidraBase):
             )
             yield Branch(type=BranchType(flow), target=addr)
 
+    @override
     def get_bb_instructions(
-        self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any
+        self, bb_addr: int, bb_ctxt: int, func_ctxt: int
     ) -> List[Tuple[bytes, str]]:
         """
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.

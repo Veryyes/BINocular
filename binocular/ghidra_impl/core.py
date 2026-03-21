@@ -10,7 +10,8 @@ import pathlib
 import pkgutil
 import zipfile
 import tempfile
-from typing import Any
+from typing_extensions import override
+
 from urllib.request import urlopen
 from collections import OrderedDict
 
@@ -22,6 +23,7 @@ import requests  # type: ignore[import-untyped]
 from .. import logger
 from ..utils import run_proc
 from ..disassembler import Disassembler
+from ..consts import IL
 
 
 def gzf_project_name(gzf_path: pathlib.Path) -> str | None:
@@ -289,6 +291,10 @@ class GhidraBase(Disassembler):
 
         return os.path.exists(release_install) or os.path.exists(build_install)
 
+    @classmethod
+    def IL(cls) -> IL:
+        return IL.PCODE
+
     def __init__(
         self,
         filepath: pathlib.Path | str,
@@ -375,12 +381,14 @@ class GhidraBase(Disassembler):
     def analyze(self) -> None:
         super().analyze()
 
+    @override
     def get_func_addr(self, func_ctxt: int) -> int:
         """Returns the address of the function corresponding to the function information returned from `get_func_iterator()`"""
         # Here, func_ctxt is the address
         return func_ctxt
 
-    def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
+    @override
+    def get_bb_addr(self, bb_ctxt: int, func_ctxt: int) -> int:
         """
         Returns the address of the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """

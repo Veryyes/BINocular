@@ -282,7 +282,7 @@ class BasicBlock(NativeCode):
             end = self.end()
             if end is None:
                 raise RuntimeError("Unreachable Code")
-            return x >= self.address and x <= end
+            return x >= self.address and x < end
         raise TypeError
 
     def __bytes__(self):
@@ -309,20 +309,30 @@ class BasicBlock(NativeCode):
     def num_instructions(self):
         return len(self.instructions)
 
-    def vex(self):
+    def vex(self) -> IR | None:
         bb_ir = []
         for instr in self.instructions:
             bb_ir.append(instr.vex().data)
         return IR(lang_name=IL.VEX, data="\n".join(bb_ir))
 
-    def ir(self):
+    def ir(self) -> IR | None:
+        lang = IL.UNK
         bb_ir = []
+
+        if len(self.instructions) == 0:
+            return None
+
+        # We can assume no one is mixing IL. That would be hella weird otherwise
+        instr = self.instructions[0]
+        if instr.ir is not None:
+            lang = instr.ir.lang_name
+
         for instr in self.instructions:
             if instr.ir is None:
                 bb_ir.append(instr.vex().data)
             else:
                 bb_ir.append(instr.ir.data)
-        return IR(lang_name=instr.ir.lang_name, data="\n".join(bb_ir))
+        return IR(lang_name=lang, data="\n".join(bb_ir))
 
 
 class NativeFunction(NativeCode):
@@ -501,7 +511,11 @@ class NativeFunction(NativeCode):
 
         ir = []
         for bb in bbs:
-            ir.append(bb.ir().data)
+            ir_obj = bb.ir()
+
+            # ir_obj would only be None if the basic block had no instructions
+            if ir_obj is not None:
+                ir.append(ir_obj.data)
 
         return "\n".join(ir)
 

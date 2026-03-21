@@ -49,7 +49,6 @@ def parse(
         disasm_type.install()
 
     if quiet:
-        logging.disable(logging.INFO)
         logging.disable(logging.WARN)
 
     with disasm_type(filepath=path, verbose=not quiet) as disasm:
