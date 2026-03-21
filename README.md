@@ -11,10 +11,9 @@
 ![Static Badge](https://img.shields.io/badge/Disassembler-Rizin-yellow)
 ![Static Badge](https://img.shields.io/badge/Disassembler-Ghidra-red)
 
-BINocular is an python package for static analysis of compiled binaries 
-through a common API layer. It is an abstraction layer between different
-disassemblers and provides:
+BINocular is a disassembler agnostic binary analysis framework written in python. It provides an common abstraction layer between different disassemblers.
 
+Features Include: 
 - Disassembler Agnostic Representation of Common Binary Analysis Primitives and Concepts
   * Assembly Instructions
   * Intermediate Representations (e.g., pcode)
@@ -24,7 +23,6 @@ disassemblers and provides:
   * Control Flow Graph
 - CLI and API to install supported disassemblers
 - Serialization/Deserialization of concepts (e.g., Functions, Basic Blocks, Instructions)
-- Persistent storage of objects to SQL databases
 
 ## Disassembler Backend Support
 ### [Ghidra](https://www.ghidra-sre.org/)
@@ -71,33 +69,20 @@ $ binocular install ghidra -l
 
 **Install Ghidra from Command Line**
 ```shell
-$ binocular install ghidra -v 11.1 -p ~/Documents/ghidra_install_location
-2024-06-15 13:41:04 binocular.ghidra[472653] INFO Installing Ghidra 11.1 to /home/brandon/Documents/ghidra_install_location
-2024-06-15 13:41:27 binocular.ghidra[472653] INFO Extracting Ghidra
-2024-06-15 13:41:31 pyhidra.javac[472653] INFO WARNING
-2024-06-15 13:41:32 pyhidra.launcher[472653] INFO Installed plugin: pyhidra 1.1.0
+$ binocular install ghidra -v 12.0.1
+2026-03-21 01:53:04 BINocular[336690] INFO Installing Ghidra 12.0.1 to /home/brandon/Documents/DaSH/compiler_wiz/angha/BINocular/binocular/data/ghidra
+2026-03-21 01:53:04 BINocular[336690] INFO Downloading https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.1_build/ghidra_12.0.1_PUBLIC_20260114.zip...
+2026-03-21 01:53:24 BINocular[336690] INFO Extracting Ghidra
+2026-03-21 01:54:21 BINocular[336690] INFO Ghidra Install Completed
 ```
 
-**Parse a Binary and load it to a SQLite Database**
+**Install Rizin from Command Line**
 ```shell
-$ binocular parse ./test/example rizin --uri sqlite:///$(pwd)/example.db
-2024-06-15 13:46:23 binocular.disassembler[473064] INFO [Rizin] Analyzing test/example
-2024-06-15 13:46:23 binocular.disassembler[473064] INFO [Rizin] Analysis Complete: 0.03s
-2024-06-15 13:46:23 binocular.disassembler[473064] INFO [Rizin] Binary Data Loaded: 0.00s
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] 49 Basic Blocks Loaded
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] 18 Functions Loaded
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] Function Data Loaded: 2.26s
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] Ave Function Load Time: 0.13s
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] Parsing Complete: 2.26s
-Binary:
-	Name: example
-	Arch: x86
-	Bits: 64
-	Endian: Endian.LITTLE
-	SHA256: a7f9141c1781c20d13b8442f24fcddba4b75b4b73ae04e734a92a79fcf0869c3
-	Size: 18088
-	Num Functions: 18
-Inserting to DB
+$ binocular install rizin
+2026-03-21 01:53:25 BINocular[337174] INFO Installing Rizin
+2026-03-21 01:53:25 BINocular[337174] INFO Installing Rizin v0.8.2 to /home/brandon/Documents/DaSH/compiler_wiz/angha/BINocular/binocular/data/rizin
+2026-03-21 01:53:25 BINocular[337174] INFO Downloading https://github.com/rizinorg/rizin/releases/download/v0.8.2/rizin-v0.8.2-static-x86_64.tar.xz...
+2026-03-21 01:54:33 BINocular[337174] INFO Rizin Install Completed
 ```
 
 ## Example Python Usage
