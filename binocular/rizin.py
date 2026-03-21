@@ -157,7 +157,10 @@ class Rizin(Disassembler):
         return install_dir
 
     def __init__(
-        self, filepath: pathlib.Path, verbose: bool = True, home: Optional[str] = None
+        self,
+        filepath: pathlib.Path | str,
+        verbose: bool = True,
+        home: Optional[str] = None,
     ) -> None:
         super().__init__(filepath=filepath, verbose=verbose)
         self.rizin_home: Optional[str] = home

@@ -292,7 +292,7 @@ class GhidraBase(Disassembler):
 
     def __init__(
         self,
-        filepath: pathlib.Path,
+        filepath: pathlib.Path | str,
         verbose: bool = True,
         project_path: Optional[str] = None,
         home: Optional[str] = None,

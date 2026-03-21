@@ -57,6 +57,15 @@ class Backend:
         return Backend.engine
 
 
+def requires_load(func):
+    @functools.wraps(func)
+    def wrapper(self: Disassembler, *args, **kwargs):
+        self._load()
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Disassembler(ABC):
     """
     Abstract Class for a Disassembler.
@@ -86,11 +95,11 @@ class Disassembler(ABC):
         def __init__(self):
             super().__init__(f"analyzer() must be run first")
 
-    def __init__(self, filepath: pathlib.Path, verbose: bool = True):
+    def __init__(self, filepath: pathlib.Path | str, verbose: bool = True):
         self.verbose: bool = verbose
         self.opened: bool = False
         self.is_loaded: bool = False
-        self.binary_filepath: pathlib.Path = filepath
+        self.binary_filepath: pathlib.Path = pathlib.Path(filepath)
 
         self._binary: Binary | None = None
         self._functions: Set[NativeFunction] | None = None
@@ -136,22 +145,27 @@ class Disassembler(ABC):
 
         return self._functions
 
+    @requires_load
     def function_at(self, address: int) -> Optional[NativeFunction]:
         """Returns a Function at the address specified"""
         return self._func_addrs.get(address, None)
 
+    @requires_load
     def function_sym(self, symbol: str) -> Optional[NativeFunction]:
         """Returns a Function with the given symbol names"""
         return self._func_names.get(symbol, None)
 
+    @requires_load
     def basic_block(self, address: int) -> Optional[BasicBlock]:
         """Returns a basic block at the given address"""
         return self._bbs.get(address, None)
 
+    @requires_load
     def instruction(self, address: int) -> Optional[Instruction]:
         """Returns the instruction at the given address"""
         return self._instrs.get(address, None)
 
+    @requires_load
     def function_containing(self, address: int) -> Optional[NativeFunction]:
         """Return the function which contains the given address"""
         idx = bisect.bisect_left(self._func_sorted, address)
@@ -166,6 +180,7 @@ class Disassembler(ABC):
 
         return self._func_addrs[self._func_sorted[idx]]
 
+    @requires_load
     def bb_containing(self, address: int) -> Optional[BasicBlock]:
         """Return the basicblock containing the given address"""
         idx = bisect.bisect_left(self._bbs_sorted, address)
@@ -469,6 +484,7 @@ class Disassembler(ABC):
                 stack_frame_size=self.get_func_stack_frame_size(addr, func_ctxt),
                 variables=[v for v in self.get_func_vars(addr, func_ctxt)],
             )
+            f._ctxt = func_ctxt
             decompiled_code = self.get_func_decomp(addr, func_ctxt)
 
             dsrc = None
@@ -506,17 +522,14 @@ class Disassembler(ABC):
             funcs.add(f)
 
         # 2nd pass to do callee/callers
-        for func_ctxt in self.get_func_iterator():
-            addr = self.get_func_addr(func_ctxt)
-            func_name = self.get_func_name(addr, func_ctxt)
-            f = self._func_addrs[addr]
-
+        for f in funcs:
             f.called_by = set()
-            for caller_addr in self.get_func_callers(addr, func_ctxt):
+            assert f.address is not None  # We just set it above
+            for caller_addr in self.get_func_callers(f.address, f._ctxt):
                 f.called_by.add(caller_addr)
 
             f.calls_addrs = set()
-            for callee_addr in self.get_func_callees(addr, func_ctxt):
+            for callee_addr in self.get_func_callees(f.address, f._ctxt):
                 f.calls_addrs.add(callee_addr)
 
         return funcs
@@ -578,6 +591,7 @@ class Disassembler(ABC):
             cur_addr += len(data)
 
     @functools.cache
+    @requires_load
     def _strings(self, min_size: int = 4) -> Iterable[str]:
         CHUNK_SIZE = 4096
         MIN_BUFFER_SIZE = min_size + 1  # +1 to account for null terminator

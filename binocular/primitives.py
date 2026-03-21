@@ -494,6 +494,7 @@ class NativeFunction(NativeCode):
     Represents a natively compiled function
     """
 
+    _ctxt: Any = None  # Reference to backing disassebler function context object
     _block_lookup: Dict[int, BasicBlock] = dict()
     _binary: Optional[Binary] = None
 
@@ -950,8 +951,6 @@ class Binary(NativeCode):
 
     # Path to where the binary is stored
     _path: Optional[Path] = None
-    # Whether or not the binary at self._path is gz compressed
-    _compressed: bool = False
     # The file contents of the binary
     _bytes: Optional[bytes] = None
     _size: Optional[int] = None

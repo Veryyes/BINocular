@@ -19,10 +19,10 @@ def test_build_commit():
 
 
 def test_disassm(make):
-    with Rizin() as g:
+    with Rizin("example") as g:
         assert g.is_installed()
 
-        g.load("example")
+        g.analyze()
         b = g.binary
 
         assert "example" in b.names
@@ -44,10 +44,10 @@ def test_disassm(make):
 
 
 def test_binary(make):
-    with Rizin() as g:
+    with Rizin("example") as g:
         assert g.is_installed()
 
-        g.load("example")
+        g.analyze()
         b = g.binary
 
         borm = b.orm()
@@ -75,10 +75,10 @@ def test_binary(make):
 
 
 def test_function(make):
-    with Rizin() as g:
+    with Rizin("example") as g:
         assert g.is_installed()
 
-        g.load("example")
+        g.analyze()
         f = g.function_sym("foo")
 
         form = f.orm()

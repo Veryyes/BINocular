@@ -14,8 +14,8 @@ def test_insert_two(make):
     assert Ghidra.is_installed()
 
     for bin in bins:
-        with Ghidra() as g:
-            g.load(bin)
+        with Ghidra(bin) as g:
+            g.analyze()
             b = g.binary
 
             with Session(Backend.engine) as s:
@@ -40,15 +40,14 @@ def test_insert_multiple(make):
 
     assert Ghidra.is_installed()
 
-    with Ghidra() as g:
-        for bin in bins:
-            g.load(bin)
+    for binary in bins:
+        with Ghidra(binary) as g:
+            g.analyze()
             b = g.binary
 
             with Session(Backend.engine) as s:
                 b.db_add(s)
                 s.commit()
-            g.clear()
 
     with Session(Backend.engine) as s:
         res = s.query(BinaryORM).all()

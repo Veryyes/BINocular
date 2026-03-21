@@ -34,7 +34,7 @@ DEFAULT_DECOMP_TIMEOUT_S = 60 * 10
 class Ghidra(GhidraBase):
     def __init__(
         self,
-        filepath: pathlib.Path,
+        filepath: pathlib.Path | str,
         verbose: bool = True,
         project_path: str | None = None,
         home: str | None = None,
@@ -47,10 +47,10 @@ class Ghidra(GhidraBase):
         self._program: ghidra.program.model.listing.Program | None = None
         self._consumer: typing.Any = None
 
+        self._monitor: ghidra.util.task.ConsoleTaskMonitor | None = None
         self._decomp: ghidra.app.decompiler.DecompInterface | None = None
         self.decomp_timeout = decomp_timeout
 
-        self.monitor = ghidra.util.task.ConsoleTaskMonitor()
         self.analysis_log: str = ""
 
     @classmethod
@@ -106,7 +106,7 @@ class Ghidra(GhidraBase):
     @property
     def decomp(self) -> ghidra.app.decompiler.DecompInterface:
         if self.opened:
-            if self._decomp is not None:
+            if self._decomp is None:
                 import ghidra.app.decompiler
 
                 self._decomp = ghidra.app.decompiler.DecompInterface()
@@ -129,6 +129,14 @@ class Ghidra(GhidraBase):
     @property
     def listing(self) -> ghidra.program.model.listing.Listing:
         return self.program.getListing()
+
+    @property
+    def monitor(self) -> ghidra.util.task.ConsoleTaskMonitor:
+        import ghidra.util.task
+
+        if self._monitor is None:
+            self._monitor = ghidra.util.task.ConsoleTaskMonitor()
+        return self._monitor
 
     def open(self) -> typing_extensions.Self:
         super().open()

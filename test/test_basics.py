@@ -4,8 +4,8 @@ from binocular import Binary, Ghidra, Rizin
 
 
 def test_instr_serial():
-    with Rizin() as g:
-        g.load("example")
+    with Rizin("example") as g:
+        g.analyze()
         f = g.function_sym("fib")
         bb = list(f.basic_blocks)[0]
         instr = bb.instructions[0]
@@ -15,8 +15,8 @@ def test_instr_serial():
 
 
 def test_bb_serial():
-    with Rizin() as g:
-        g.load("example")
+    with Rizin("example") as g:
+        g.analyze()
         f = g.function_sym("fib")
         bb = list(f.basic_blocks)[0]
         bb.model_dump_json()
@@ -25,8 +25,8 @@ def test_bb_serial():
 
 
 def test_func_serial():
-    with Rizin() as g:
-        g.load("example")
+    with Rizin("example") as g:
+        g.analyze()
         f = g.function_sym("fib")
         f.model_dump_json()
 
@@ -34,8 +34,8 @@ def test_func_serial():
 
 
 def test_bin_serial():
-    with Rizin() as g:
-        g.load("example")
+    with Rizin("example") as g:
+        g.analyze()
         b = g.binary
         b.model_dump_json()
 
@@ -46,8 +46,8 @@ def test_serial_and_back(make):
     assert Ghidra.is_installed()
 
     serialized = None
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         b = g.binary
         serialized = json.loads(b.model_dump_json())
         b_prime = Binary.model_validate(serialized)

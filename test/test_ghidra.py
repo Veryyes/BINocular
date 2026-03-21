@@ -54,8 +54,8 @@ def test_build_commit_2():
 
 def test_disassm(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         b = g.binary
 
         assert "example" in b.names
@@ -78,8 +78,8 @@ def test_disassm(make):
 
 def test_binary(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         b = g.binary
 
         borm = b.orm()
@@ -108,8 +108,8 @@ def test_binary(make):
 
 def test_function(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         f = g.function_sym("foo")
 
         form = f.orm()
@@ -132,8 +132,8 @@ def test_function(make):
 
 def test_script(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         stdout = g.run_script("./ghidra_script.py", 10)
 
     assert stdout is not None
@@ -142,8 +142,8 @@ def test_script(make):
 
 def test_script_args(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         script_args = ["ARRRGH", "BLEHH", "BIN OCULAR", '"X"']
         stdout = g.run_script("./ghidra_script_args.py", 10, script_args=script_args)
         assert stdout is not None
@@ -153,7 +153,7 @@ def test_script_args(make):
 
 def test_script_java(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         stdout = g.run_script("HelloWorld.java", 10)
     assert "Hello, World!" in stdout
