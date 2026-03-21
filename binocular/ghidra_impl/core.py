@@ -292,11 +292,12 @@ class GhidraBase(Disassembler):
 
     def __init__(
         self,
+        filepath: pathlib.Path,
         verbose: bool = True,
         project_path: Optional[str] = None,
         home: Optional[str] = None,
     ):
-        super().__init__(verbose=verbose)
+        super().__init__(filepath=filepath, verbose=verbose)
 
         if project_path is None:
             project_path = self.DEFAULT_PROJECT_PATH()
@@ -340,13 +341,12 @@ class GhidraBase(Disassembler):
             return self._bin_name
         raise self.NotOpenedError
 
-    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
-        super().open(binary_path)
-        path = pathlib.Path(binary_path)
+    def open(self) -> typing_extensions.Self:
+        super().open()
 
         self.bin_size = 0
         m = hashlib.md5()
-        with open(path, "rb") as f:
+        with open(self.binary_filepath, "rb") as f:
             chunk = f.read(4096)
             while chunk:
                 m.update(chunk)
@@ -361,13 +361,15 @@ class GhidraBase(Disassembler):
         self.project_location = os.path.join(self.base_project_path, md5hash)
         self._project_name = md5hash
 
-        self._bin_name = path.name
+        self._bin_name = self.binary_filepath.name
 
-        if path.suffix == ".gzf":
-            self._bin_name = gzf_project_name(path)
+        if self.binary_filepath.suffix == ".gzf":
+            self._bin_name = gzf_project_name(self.binary_filepath)
 
         if self._bin_name is None:
-            raise OSError(f"Failed to resolve input binary from path: {path}")
+            raise OSError(
+                f"Failed to resolve input binary from path: {self.binary_filepath}"
+            )
 
         return self
 

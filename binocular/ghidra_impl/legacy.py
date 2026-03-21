@@ -8,7 +8,8 @@ import threading
 import time
 from collections.abc import Iterable
 from enum import Enum
-from typing import IO, Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
+import pathlib
 
 
 from .core import GhidraBase
@@ -209,13 +210,16 @@ class ProcMon(threading.Thread):
 class GhidraLegacy(GhidraBase):
     def __init__(
         self,
+        filepath: pathlib.Path,
         verbose: bool = True,
         project_path: Optional[str] = None,
         home: Optional[str] = None,
         cpus: int = 1,
         analysis_timeout: Optional[int] = None,
     ):
-        super().__init__(verbose=verbose, project_path=project_path, home=home)
+        super().__init__(
+            filepath=filepath, verbose=verbose, project_path=project_path, home=home
+        )
         self.cpus: int = cpus
         self.ghidra_proc: Optional[subprocess.Popen] = None
         self.unix_socket: str = os.path.join("/tmp", f"binocular_ghidra_{os.getpid()}")

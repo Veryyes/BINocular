@@ -86,12 +86,11 @@ class Disassembler(ABC):
         def __init__(self):
             super().__init__(f"analyzer() must be run first")
 
-    def __init__(self, verbose: bool = True):
+    def __init__(self, filepath: pathlib.Path, verbose: bool = True):
         self.verbose: bool = verbose
         self.opened: bool = False
         self.is_loaded: bool = False
-
-        self._binary_filepath: pathlib.Path | None = None
+        self.binary_filepath: pathlib.Path = filepath
 
         self._binary: Binary | None = None
         self._functions: Set[NativeFunction] | None = None
@@ -105,8 +104,8 @@ class Disassembler(ABC):
         self._bbs_sorted: List[int] = list()
         self._instrs: Dict[int, Instruction] = dict()
 
-    def __enter__(self, binary_path: str | pathlib.Path):
-        return self.open(binary_path)
+    def __enter__(self):
+        return self.open()
 
     def __exit__(
         self,
@@ -120,16 +119,6 @@ class Disassembler(ABC):
     def name(self):
         """Returns the Name of the Disassembler"""
         return self.__class__.__name__
-
-    @property
-    def binary_filepath(self) -> pathlib.Path:
-        if self._binary_filepath is not None:
-            return self._binary_filepath
-        raise Disassembler.NotOpenedError
-
-    @binary_filepath.setter
-    def binary_filepath(self, value: pathlib.Path) -> None:
-        self._binary_filepath = value
 
     @property
     def binary(self) -> Binary:
@@ -206,10 +195,9 @@ class Disassembler(ABC):
         """List installable verions of this disassembler"""
         return list()
 
-    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
+    def open(self) -> typing_extensions.Self:
         """Open up any resources"""
         self.opened = True
-        self.binary_filepath = pathlib.Path(binary_path)
         return self
 
     def close(self):

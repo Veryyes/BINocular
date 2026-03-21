@@ -156,8 +156,10 @@ class Rizin(Disassembler):
         logger.info("Rizin Install Completed")
         return install_dir
 
-    def __init__(self, verbose=True, home: Optional[str] = None) -> None:
-        super().__init__(verbose=verbose)
+    def __init__(
+        self, filepath: pathlib.Path, verbose: bool = True, home: Optional[str] = None
+    ) -> None:
+        super().__init__(filepath=filepath, verbose=verbose)
         self.rizin_home: Optional[str] = home
         self._pipe: Optional[rzpipe.open] = None
 
@@ -178,15 +180,14 @@ class Rizin(Disassembler):
             return self._bin_info
         raise self.AnalyzeNotRunError
 
-    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
-        super().open(binary_path)
-        path = pathlib.Path(binary_path)
+    def open(self) -> typing_extensions.Self:
+        super().open()
 
-        if not path.exists() or path.is_dir():
-            raise OSError(f"File not Found: {path}")
+        if not self.binary_filepath.exists() or self.binary_filepath.is_dir():
+            raise OSError(f"File not Found: {self.binary_filepath}")
 
         try:
-            self._pipe = rzpipe.open(path)
+            self._pipe = rzpipe.open(self.binary_filepath)
         except Exception:
             if self.rizin_home is None:
                 self.rizin_home = Rizin.DEFAULT_INSTALL()
@@ -194,9 +195,13 @@ class Rizin(Disassembler):
             pre_built_loc = os.path.join(self.rizin_home, "bin")
             build_loc = os.path.join(self.rizin_home, "build", "binrz", "rizin")
             if os.path.exists(pre_built_loc):
-                self._pipe = rzpipe.open(path, rizin_home=pre_built_loc)
+                self._pipe = rzpipe.open(
+                    str(self.binary_filepath), rizin_home=pre_built_loc
+                )
             elif os.path.exists(build_loc):
-                self._pipe = rzpipe.open(path, rizin_home=build_loc)
+                self._pipe = rzpipe.open(
+                    str(self.binary_filepath), rizin_home=build_loc
+                )
             else:
                 raise FileNotFoundError("Can't find rizin binary")
 

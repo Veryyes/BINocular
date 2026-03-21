@@ -34,12 +34,15 @@ DEFAULT_DECOMP_TIMEOUT_S = 60 * 10
 class Ghidra(GhidraBase):
     def __init__(
         self,
+        filepath: pathlib.Path,
         verbose: bool = True,
         project_path: str | None = None,
         home: str | None = None,
         decomp_timeout: int = DEFAULT_DECOMP_TIMEOUT_S,
     ):
-        super().__init__(verbose=verbose, project_path=project_path, home=home)
+        super().__init__(
+            filepath=filepath, verbose=verbose, project_path=project_path, home=home
+        )
         self.project_ctxt: ghidra.framework.model.Project | None = None
         self._program: ghidra.program.model.listing.Program | None = None
         self._consumer: typing.Any = None
@@ -127,8 +130,8 @@ class Ghidra(GhidraBase):
     def listing(self) -> ghidra.program.model.listing.Listing:
         return self.program.getListing()
 
-    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
-        super().open(binary_path)
+    def open(self) -> typing_extensions.Self:
+        super().open()
         if not pyghidra.started():
             pyghidra.start(install_dir=self.ghidra_home)
 
