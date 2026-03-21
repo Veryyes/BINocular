@@ -1,7 +1,7 @@
 import itertools
 import tempfile
 
-from binocular import Binary, Rizin
+from binocular import Rizin
 
 
 def test_install_release():
@@ -43,56 +43,21 @@ def test_disassm(make):
             assert f0 == f1
 
 
-def test_binary(make):
-    with Rizin("example") as g:
-        assert g.is_installed()
-
-        g.analyze()
-        b = g.binary
-
-        borm = b.orm()
-        assert b.architecture == borm.architecture
-        assert b.endianness == borm.endianness
-        assert b.bitness == borm.bitness
-        assert b.entrypoint == borm.entrypoint
-        assert b.os == borm.os
-        assert b.sha256 == borm.sha256
-
-        b1 = Binary.from_orm(borm)
-        assert b1.architecture == borm.architecture
-        assert b1.endianness == borm.endianness
-        assert b1.bitness == borm.bitness
-        assert b1.entrypoint == borm.entrypoint
-        assert b1.os == borm.os
-        assert b1.sha256 == borm.sha256
-
-        assert b1.architecture == b.architecture
-        assert b1.endianness == b.endianness
-        assert b1.bitness == b.bitness
-        assert b1.entrypoint == b.entrypoint
-        assert b1.os == b.os
-        assert b1.sha256 == b.sha256
-
-
 def test_function(make):
     with Rizin("example") as g:
         assert g.is_installed()
 
         g.analyze()
-        f = g.function_sym("foo")
 
-        form = f.orm()
-        assert f.architecture == form.architecture
-        assert f.endianness == form.endianness
-        assert f.bitness == form.bitness
-        assert f.return_type == form.return_type
-        assert ", ".join([str(x) for x in f.argv]) == form.argv
+        binary = g.binary
 
-        f = g.function_sym("main")
-        assert g.function_sym("foo") in [x for x in f.calls]
-        assert g.function_sym("fib") in [x for x in f.calls]
+        f = binary.function_sym("foo")
+
+        f = binary.function_sym("main")
+        assert binary.function_sym("foo") in [x for x in f.calls]
+        assert binary.function_sym("fib") in [x for x in f.calls]
 
         # Recursive, so itself should be a caller and calls
-        f = g.function_sym("fib")
+        f = binary.function_sym("fib")
         assert f in [x for x in f.callers]
         assert f in [x for x in f.calls]

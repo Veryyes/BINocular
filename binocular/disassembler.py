@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import bisect
 import os
 import string
 import pathlib
@@ -9,7 +8,7 @@ import types
 import functools
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, List, Optional, Set, Tuple, Type
 
 
 from . import logger
@@ -26,15 +25,6 @@ from .primitives import (
     SourceFunction,
     Variable,
 )
-
-
-def requires_load(func):
-    @functools.wraps(func)
-    def wrapper(self: Disassembler, *args, **kwargs):
-        self._load()
-        return func(self, *args, **kwargs)
-
-    return wrapper
 
 
 class Disassembler(ABC):
@@ -74,15 +64,6 @@ class Disassembler(ABC):
 
         self._binary: Binary | None = None
         self._functions: Set[NativeFunction] | None = None
-        # maps function names to function objects
-        self._func_names: Dict[str, NativeFunction] = dict()
-        # maps function addresses to function objects
-        self._func_addrs: Dict[int, NativeFunction] = dict()
-        # list of function addresses sorted ascending
-        self._func_sorted: List[int] = list()
-        self._bbs: Dict[int, BasicBlock] = dict()
-        self._bbs_sorted: List[int] = list()
-        self._instrs: Dict[int, Instruction] = dict()
 
     def __enter__(self):
         return self.open()
@@ -115,62 +96,6 @@ class Disassembler(ABC):
             assert self._functions is not None
 
         return self._functions
-
-    @requires_load
-    def function_at(self, address: int) -> Optional[NativeFunction]:
-        """Returns a Function at the address specified"""
-        return self._func_addrs.get(address, None)
-
-    @requires_load
-    def function_sym(self, symbol: str) -> Optional[NativeFunction]:
-        """Returns a Function with the given symbol names"""
-        return self._func_names.get(symbol, None)
-
-    @requires_load
-    def basic_block(self, address: int) -> Optional[BasicBlock]:
-        """Returns a basic block at the given address"""
-        return self._bbs.get(address, None)
-
-    @requires_load
-    def instruction(self, address: int) -> Optional[Instruction]:
-        """Returns the instruction at the given address"""
-        return self._instrs.get(address, None)
-
-    @requires_load
-    def function_containing(self, address: int) -> Optional[NativeFunction]:
-        """Return the function which contains the given address"""
-        idx = bisect.bisect_left(self._func_sorted, address)
-        if idx >= len(self._func_sorted):
-            return self._func_addrs[self._func_sorted[-1]]
-        if self._func_sorted[idx] == address:
-            return self._func_addrs[self._func_sorted[idx]]
-
-        idx -= 1
-        if idx < 0:
-            return None
-
-        return self._func_addrs[self._func_sorted[idx]]
-
-    @requires_load
-    def bb_containing(self, address: int) -> Optional[BasicBlock]:
-        """Return the basicblock containing the given address"""
-        idx = bisect.bisect_left(self._bbs_sorted, address)
-
-        if idx >= len(self._bbs_sorted):
-            bb = self._bbs[self._bbs_sorted[-1]]
-        elif self._bbs_sorted[idx] == address:
-            bb = self._bbs[self._bbs_sorted[idx]]
-        else:
-            idx -= 1
-            if idx < 0:
-                return None
-
-            bb = self._bbs[self._bbs_sorted[idx]]
-
-        if address in bb:
-            return bb
-
-        return None
 
     ############################################
     # OPTIONAL DISASSEMBLER DEFINED OPERATIONS #
@@ -401,23 +326,7 @@ class Disassembler(ABC):
         self._binary = self._load_binary()
         self._functions = self._load_functions()
         self._binary.functions = self._functions
-        for f in self._functions:
-            f._binary = self._binary
-
-            # Generally functions will have a default name and address,
-            # but our model has the flexibility for these two be None if you wish to manipulate these outside the context of a program
-            if f.names is not None and len(f.names) > 0:
-                self._func_names[f.names[0]] = f
-            if f.address is not None:
-                self._func_addrs[f.address] = f
-
-        # TODO
-        # Disassembler can populate it for the Binary object, but Binary should be able to do this itself transparently on its own
-        self._binary._function_lookup = self._func_addrs
-        self._func_sorted = list(self._func_addrs)
-        self._func_sorted.sort()
-        self._bbs_sorted = list(self._bbs)
-        self._bbs_sorted.sort()
+        self._binary._build_indexes()
 
         self.is_loaded = True
 
@@ -535,8 +444,6 @@ class Disassembler(ABC):
             f._block_lookup[bb.address] = bb
             bb.set_function(f)
 
-            self._bbs[bb_addr] = bb
-
         if len(xrefs) > 0 and len(f.basic_blocks) > 0:
             logger.warn(f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
 
@@ -557,24 +464,20 @@ class Disassembler(ABC):
             ir = self.get_ir_from_instruction(cur_addr, instr)
             instr.ir = ir
             bb.instructions.append(instr)
-            self._instrs[cur_addr] = instr
 
             cur_addr += len(data)
 
     @functools.cache
-    @requires_load
     def _strings(self, min_size: int = 4) -> Iterable[str]:
         CHUNK_SIZE = 4096
         MIN_BUFFER_SIZE = min_size + 1  # +1 to account for null terminator
-
         strings = list()
         printables = bytes(string.printable, "ascii")
 
         buff = b""
-        try:
-            io_stream = self.binary.io()
+        with open(self.binary_filepath, "rb") as f:
             while True:
-                chunk = io_stream.read(CHUNK_SIZE)
+                chunk = f.read(CHUNK_SIZE)
                 if not chunk:
                     break
                 buff += chunk
@@ -590,7 +493,5 @@ class Disassembler(ABC):
                     else:
                         buff = buff[1:]
                     i = 0
-        finally:
-            io_stream.close()
 
         return strings

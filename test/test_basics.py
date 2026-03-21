@@ -4,9 +4,11 @@ from binocular import Binary, Ghidra, Rizin
 
 
 def test_instr_serial():
-    with Rizin("example") as g:
-        g.analyze()
-        f = g.function_sym("fib")
+    with Rizin("example") as r:
+        r.analyze()
+        binary = r.binary
+
+        f = binary.function_sym("fib")
         bb = list(f.basic_blocks)[0]
         instr = bb.instructions[0]
         instr.model_dump_json()
@@ -15,9 +17,11 @@ def test_instr_serial():
 
 
 def test_bb_serial():
-    with Rizin("example") as g:
-        g.analyze()
-        f = g.function_sym("fib")
+    with Rizin("example") as r:
+        r.analyze()
+        binary = r.binary
+
+        f = binary.function_sym("fib")
         bb = list(f.basic_blocks)[0]
         bb.model_dump_json()
 
@@ -25,18 +29,20 @@ def test_bb_serial():
 
 
 def test_func_serial():
-    with Rizin("example") as g:
-        g.analyze()
-        f = g.function_sym("fib")
+    with Rizin("example") as r:
+        r.analyze()
+        binary = r.binary
+
+        f = binary.function_sym("fib")
         f.model_dump_json()
 
     assert True
 
 
 def test_bin_serial():
-    with Rizin("example") as g:
-        g.analyze()
-        b = g.binary
+    with Rizin("example") as r:
+        r.analyze()
+        b = r.binary
         b.model_dump_json()
 
     assert True

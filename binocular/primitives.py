@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import bisect
 from collections import defaultdict
 from functools import cached_property
 from pathlib import Path
@@ -413,7 +414,7 @@ class NativeFunction(NativeCode):
             raise NoContextException("Function is not associated with Binary")
 
         for addr in self.calls_addrs:
-            f = self._binary._function_lookup.get(addr, None)
+            f = self._binary._func_addrs.get(addr, None)
             if f is not None:
                 yield f
 
@@ -424,7 +425,7 @@ class NativeFunction(NativeCode):
             raise NoContextException("Function is not associated with Binary")
 
         for addr in self.called_by:
-            f = self._binary._function_lookup.get(addr, None)
+            f = self._binary._func_addrs.get(addr, None)
             if f is not None:
                 yield f
 
@@ -612,14 +613,17 @@ class Binary(NativeCode):
     class NoDataException(Exception):
         pass
 
-    # Path to where the binary is stored
     _path: Optional[Path] = None
-    # The file contents of the binary
     _bytes: Optional[bytes] = None
     _size: Optional[int] = None
-    _function_lookup: Dict[int, NativeFunction] = dict()
 
     functions: Set[NativeFunction] = set()
+    _func_sorted: List[NativeFunction] = list()
+    _func_names: Dict[str, NativeFunction] = dict()
+    _func_addrs: Dict[int, NativeFunction] = dict()
+    _bbs: Dict[int, BasicBlock] = dict()
+    _bbs_sorted: List[BasicBlock] = list()
+    _instrs: Dict[int, Instruction] = dict()
 
     filename: Optional[Union[str, List[str]]] = None
 
@@ -636,29 +640,8 @@ class Binary(NativeCode):
     # Strings from String table if they exists, otherwise strings detected in the binary (like unix `strings`` command)
     strings: Set[str] = set([])
 
-    # User defined tags
-    tags: Set[str] = set([])
-
-    @model_validator(mode="after")
-    def _populate_cache(self):
-        for f in self.functions:
-            self._function_lookup[f.address] = f
-            f._binary = self
-        return self
-
-    @classmethod
-    def from_path(cls, path: Union[Path, str], **kwargs):
-        obj = cls(**kwargs)
-        obj._path = Path(path)
-        return obj
-
-    @classmethod
-    def from_bytes(cls, b: bytes, **kwargs):
-        obj = cls(**kwargs)
-        obj._bytes = b
-        return obj
-
     def __len__(self):
+        """returns the size of the binary in bytes"""
         if self._size is None:
             if self._path is not None:
                 self._size = os.path.getsize(self._path)
@@ -727,3 +710,75 @@ class Binary(NativeCode):
             return tp
 
         raise Binary.NoDataException("Binary Object has no Path or data")
+
+    def function_at(self, address: int) -> Optional[NativeFunction]:
+        """Returns a Function at the address specified"""
+        return self._func_addrs.get(address, None)
+
+    def function_sym(self, symbol: str) -> Optional[NativeFunction]:
+        """Returns a Function with the given symbol names"""
+        return self._func_names.get(symbol, None)
+
+    def basic_block(self, address: int) -> Optional[BasicBlock]:
+        """Returns a basic block at the given address"""
+        return self._bbs.get(address, None)
+
+    def instruction(self, address: int) -> Optional[Instruction]:
+        """Returns the instruction at the given address"""
+        return self._instrs.get(address, None)
+
+    def function_containing(self, address: int) -> Optional[NativeFunction]:
+        """Return the function which contains the given address"""
+        idx = bisect.bisect_left(self._func_sorted, address)
+        if idx >= len(self._func_sorted):
+            return self._func_addrs[self._func_sorted[-1]]
+        if self._func_sorted[idx] == address:
+            return self._func_addrs[self._func_sorted[idx]]
+
+        idx -= 1
+        if idx < 0:
+            return None
+
+        return self._func_addrs[self._func_sorted[idx]]
+
+    def bb_containing(self, address: int) -> Optional[BasicBlock]:
+        """Return the basicblock containing the given address"""
+        idx = bisect.bisect_left(self._bbs_sorted, address)
+
+        if idx >= len(self._bbs_sorted):
+            bb = self._bbs[self._bbs_sorted[-1]]
+        elif self._bbs_sorted[idx] == address:
+            bb = self._bbs[self._bbs_sorted[idx]]
+        else:
+            idx -= 1
+            if idx < 0:
+                return None
+
+            bb = self._bbs[self._bbs_sorted[idx]]
+
+        if address in bb:
+            return bb
+
+        return None
+
+    def _build_indexes(self):
+        for f in self.functions:
+            f._binary = self
+
+            # Generally functions will have a default name and address,
+            # but our model has the flexibility for these two be None if you wish to manipulate these outside the context of a program
+            if f.names is not None and len(f.names) > 0:
+                self._func_names[f.names[0]] = f
+            if f.address is not None:
+                self._func_addrs[f.address] = f
+
+            for bb in f.basic_blocks:
+                self._bbs[bb.address] = bb
+                self._bbs_sorted.append(bb.address)
+
+                for instr in bb.instructions:
+                    self._instrs[instr.address] = instr
+
+        self._func_sorted = list(self._func_addrs)
+        self._func_sorted.sort()
+        self._bbs_sorted.sort()
