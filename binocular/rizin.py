@@ -218,11 +218,6 @@ class Rizin(Disassembler):
         self.pipe.cmd("aaaa")
         self._bin_info = self.pipe.cmdj("ij")["bin"]
 
-    def _post_normalize(self):
-        del self._caller_cache
-        del self._calls_cache
-        del self._thunk_dict
-
     def get_entry_point(self) -> int:
         """Returns the address of the entry point to the function"""
         return self.pipe.cmdj("iej")[0]["vaddr"]
@@ -252,7 +247,7 @@ class Rizin(Disassembler):
         """Returns the base address the binary is based at"""
         return self.bin_info["baddr"]
 
-    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
+    def get_strings(self) -> Iterable[str]:
         """Returns the list of defined strings in the binary"""
         return [s["string"] for s in self.pipe.cmdj("izj")]
 

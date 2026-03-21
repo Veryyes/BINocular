@@ -1,15 +1,15 @@
 from __future__ import annotations
+
 import bisect
 import os
 import string
-import time
 import pathlib
 import typing_extensions
 import types
 import functools
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import IO, Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine.base import Engine
@@ -89,8 +89,12 @@ class Disassembler(ABC):
     def __init__(self, verbose: bool = True):
         self.verbose: bool = verbose
         self.opened: bool = False
+        self.is_loaded: bool = False
 
-        self._bb_count: int = 0
+        self._binary_filepath: pathlib.Path | None = None
+
+        self._binary: Binary | None = None
+        self._functions: Set[NativeFunction] | None = None
         # maps function names to function objects
         self._func_names: Dict[str, NativeFunction] = dict()
         # maps function addresses to function objects
@@ -100,10 +104,6 @@ class Disassembler(ABC):
         self._bbs: Dict[int, BasicBlock] = dict()
         self._bbs_sorted: List[int] = list()
         self._instrs: Dict[int, Instruction] = dict()
-        self.binary: Optional[Binary] = None
-        self.functions: Set[NativeFunction] = set()
-
-        self._binary_filepath: pathlib.Path | None = None
 
     def __enter__(self, binary_path: str | pathlib.Path):
         return self.open(binary_path)
@@ -131,212 +131,21 @@ class Disassembler(ABC):
     def binary_filepath(self, value: pathlib.Path) -> None:
         self._binary_filepath = value
 
-    # remove all this and lazy load
-    def load(self, load_strings: bool = True, skip_analysis: bool = False):
-        """
-        Load a binary into the disassembler and trigger any default analysis
-        :param path: The file path to binary to analyze
-        """
-        logger.info(f"[{self.name()}] Analyzing {self.binary_filepath}")
+    @property
+    def binary(self) -> Binary:
+        if self._binary is None:
+            self._load()
+            assert self._binary is not None
 
-        start = time.time()
+        return self._binary
 
-        if not skip_analysis:
-            self.analyze()
-            logger.info(
-                f"[{self.name()}] Analysis Complete: {time.time() - start:.2f}s"
-            )
+    @property
+    def functions(self) -> Set[NativeFunction]:
+        if self._functions is None:
+            self._load()
+            assert self._functions is not None
 
-        start = time.time()
-        self._create_binary(load_strings)
-        if self.binary is None:
-            raise Disassembler.FailedToLoadBinaryError(
-                "binary member was not set. Something went wrong."
-            )
-        self._create_functions()
-        self.binary.functions = self.functions
-        for f in self.binary.functions:
-            if f.address is None:
-                raise Disassembler.FailedToLoadBinaryError("Function with no address")
-            self.binary._function_lookup[f.address] = f
-
-        self._func_sorted = list(self._func_addrs)
-        self._func_sorted.sort()
-        self._bbs_sorted = list(self._bbs)
-        self._bbs_sorted.sort()
-
-        self._post_normalize()
-        logger.info(f"[{self.name()}] Parsing Complete: {time.time() - start:.2f}s")
-
-    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
-        """Open up any resources"""
-        self.opened = True
-        self.binary_filepath = pathlib.Path(binary_path)
-        return self
-
-    def _create_binary(self, load_strings: bool):
-        start = time.time()
-
-        self.binary = Binary(
-            filename=os.path.basename(self.binary_filepath),
-            names=[self.get_binary_name()],
-            entrypoint=self.get_entry_point(),
-            architecture=self.get_architecture(),
-            endianness=self.get_endianness(),
-            bitness=self.get_bitness(),
-            base_addr=self.get_base_address(),
-            dynamic_libs=self.get_dynamic_libs(),
-        )
-        self.binary.set_path(self.binary_filepath)
-
-        io_stream = self.binary.io()
-        if load_strings:
-            self.binary.strings |= set(self.get_strings(io_stream, len(self.binary)))
-        io_stream.close()
-
-        self.functions = set()
-
-        logger.info(f"[{self.name()}] Binary Data Loaded: {time.time() - start:.2f}s")
-
-    def _create_functions(self):
-        count = 0
-        for func_ctxt in self.get_func_iterator():
-            addr = self.get_func_addr(func_ctxt)
-            func_name = self.get_func_name(addr, func_ctxt)
-            logger.debug(f"Processing Function: {func_name}")
-            f = NativeFunction(
-                endianness=self.binary.endianness,
-                architecture=self.binary.architecture,
-                bitness=self.binary.bitness,
-                address=addr,
-                names=[func_name],
-                return_type=self.get_func_return_type(addr, func_ctxt),
-                argv=self.get_func_args(addr, func_ctxt),
-                thunk=self.is_func_thunk(addr, func_ctxt),
-                stack_frame_size=self.get_func_stack_frame_size(addr, func_ctxt),
-                variables=[v for v in self.get_func_vars(addr, func_ctxt)],
-            )
-            f._binary = self.binary
-
-            count += 1
-
-            decompiled_code = self.get_func_decomp(addr, func_ctxt)
-
-            dsrc = None
-            if decompiled_code is not None:
-                dsrc = SourceFunction.from_code(
-                    fname=func_name, source=decompiled_code, is_decompiled=True
-                )
-                if dsrc is None:
-                    # Failed to parse source with tree sitter :(
-                    # Random notes: some disassemblers like to inject extra things into the decompiled source
-                    # i.e. it's not true C code.
-                    # e.g., adding annotations like 'processEntry': `void processEntry _start(undefined8 param_1,undefined8 param_2)``
-                    dsrc = SourceFunction(
-                        name=func_name,
-                        decompiled=True,
-                        source=decompiled_code,
-                    )
-
-                f.sources.add(dsrc)
-
-            xrefs = set(self.get_func_xrefs(addr, func_ctxt))
-            self._create_basicblocks(addr, func_ctxt, f, xrefs.copy())
-            self.functions.add(f)
-
-            self._func_addrs[addr] = f
-            self._func_names[func_name] = f
-
-            if len(f.basic_blocks) > 0:
-                f.end_block_addrs = set(
-                    (
-                        bb.address
-                        for bb, out_degree in f.cfg.out_degree()
-                        if out_degree == 0
-                    )
-                )
-
-            elif not f.thunk:
-                logger.warn(f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
-
-            # logger.info(f"Analysis Pass 1 - {func_name}: {time.time()-start:.2f}s")
-
-        # 2nd pass to do callee/callers
-        for func_ctxt in self.get_func_iterator():
-            addr = self.get_func_addr(func_ctxt)
-            func_name = self.get_func_name(addr, func_ctxt)
-            f = self._func_addrs[addr]
-
-            f.called_by = set()
-            for caller_addr in self.get_func_callers(addr, func_ctxt):
-                f.called_by.add(caller_addr)
-
-            f.calls_addrs = set()
-            for callee_addr in self.get_func_callees(addr, func_ctxt):
-                f.calls_addrs.add(callee_addr)
-
-    def _create_basicblocks(
-        self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]
-    ):
-        if self.binary is None:
-            raise RuntimeError("self.binary is not set!")
-
-        for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
-            bb_addr = self.get_bb_addr(bb_ctxt, func_ctxt)
-
-            self._bb_count += 1
-            bb = BasicBlock(
-                endianness=self.binary.endianness,
-                architecture=self.binary.architecture,
-                bitness=self.binary.bitness,
-                address=bb_addr,
-            )
-
-            for branch_data in self.get_next_bbs(bb_addr, bb_ctxt, addr, func_ctxt):
-                bb.branches.add(branch_data)
-
-            self._create_instructions(bb_addr, bb_ctxt, bb, func_ctxt)
-
-            for xref in xrefs:
-                if xref.from_ in bb or xref.to in bb:
-                    bb.xrefs.add(xref)
-            xrefs -= bb.xrefs
-
-            f.basic_blocks.add(bb)
-
-            if bb.address is None:
-                raise RuntimeError("No address associated with basic block")
-            f._block_lookup[bb.address] = bb
-            bb.set_function(f)
-
-            self._bbs[bb_addr] = bb
-
-        if len(xrefs) > 0 and len(f.basic_blocks) > 0:
-            logger.warn(f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
-
-    def _create_instructions(
-        self, bb_addr: int, bb_ctxt: Any, bb: BasicBlock, func_ctxt: Any
-    ):
-        if self.binary is None:
-            raise RuntimeError("self.binary is not set!")
-
-        cur_addr = bb_addr
-        for data, asm in self.get_bb_instructions(bb_addr, bb_ctxt, func_ctxt):
-            instr = Instruction(
-                endianness=self.binary.endianness,
-                architecture=self.binary.architecture,
-                bitness=self.binary.bitness,
-                address=cur_addr,
-                data=data,
-                asm=asm,
-                comment=self.get_instruction_comment(cur_addr),
-            )
-            ir = self.get_ir_from_instruction(cur_addr, instr)
-            instr.ir = ir
-            bb.instructions.append(instr)
-            self._instrs[cur_addr] = instr
-
-            cur_addr += len(data)
+        return self._functions
 
     def function_at(self, address: int) -> Optional[NativeFunction]:
         """Returns a Function at the address specified"""
@@ -397,47 +206,23 @@ class Disassembler(ABC):
         """List installable verions of this disassembler"""
         return list()
 
-    def _post_normalize(self):
-        """
-        Optional Function to Override. _post_normalize is called after the the binary
-        at `path` is loaded into the underlying disassembler. This function provides
-        a way to add a custom postprocessing step.
-        """
-        pass
+    def open(self, binary_path: str | pathlib.Path) -> typing_extensions.Self:
+        """Open up any resources"""
+        self.opened = True
+        self.binary_filepath = pathlib.Path(binary_path)
+        return self
 
     def close(self):
         """Release/Free up any resources"""
         self.opened = False
 
-    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
+    def get_strings(self) -> Iterable[str]:
         """
         Returns the list of defined strings in the binary
         :param binary_io: a file-like object to the binary ingested
         :returns: list of strings in the file (similar to the strings unix utility)
         """
-        strings = list()
-        printables = bytes(string.printable, "ascii")
-
-        buff = b""
-        while True:
-            chunk = binary_io.read(4096)
-            if not chunk:
-                break
-            buff += chunk
-
-            i = 0
-            while len(buff) >= 5:
-                while buff[i] in printables:
-                    i += 1
-
-                if buff[i] == 0 and i > 3:
-                    strings.append(str(buff[:i], "ascii"))
-                    buff = buff[i + 1 :]
-                else:
-                    buff = buff[1:]
-                i = 0
-
-        return strings
+        return self._strings()
 
     def get_binary_name(self) -> str:
         """Returns the name of the binary loaded"""
@@ -629,3 +414,210 @@ class Disassembler(ABC):
         Returns a iterable of tuples of raw instruction bytes and corresponding mnemonic from the basic block corresponding to the basic block information returned from `get_func_bb_iterator()`.
         """
         raise NotImplementedError
+
+    ###################
+    # Private Helpers #
+    ###################
+
+    def _load(self) -> None:
+        # Only need to fire this function off once to populate all the member variables
+        if self.is_loaded:
+            return
+
+        self._binary = self._load_binary()
+        self._functions = self._load_functions()
+        self._binary.functions = self._functions
+        for f in self._functions:
+            f._binary = self._binary
+
+            # Generally functions will have a default name and address,
+            # but our model has the flexibility for these two be None if you wish to manipulate these outside the context of a program
+            if f.names is not None and len(f.names) > 0:
+                self._func_names[f.names[0]] = f
+            if f.address is not None:
+                self._func_addrs[f.address] = f
+
+        # TODO
+        # Disassembler can populate it for the Binary object, but Binary should be able to do this itself transparently on its own
+        self._binary._function_lookup = self._func_addrs
+        self._func_sorted = list(self._func_addrs)
+        self._func_sorted.sort()
+        self._bbs_sorted = list(self._bbs)
+        self._bbs_sorted.sort()
+
+        self.is_loaded = True
+
+    def _load_binary(self) -> Binary:
+        b = Binary(
+            filename=os.path.basename(self.binary_filepath),
+            names=[self.get_binary_name()],
+            entrypoint=self.get_entry_point(),
+            architecture=self.get_architecture(),
+            endianness=self.get_endianness(),
+            bitness=self.get_bitness(),
+            base_addr=self.get_base_address(),
+            dynamic_libs=self.get_dynamic_libs(),
+        )
+        b.set_path(self.binary_filepath)
+        b.strings |= set(self.get_strings())
+
+        return b
+
+    def _load_functions(self) -> Set[NativeFunction]:
+        funcs: Set[NativeFunction] = set()
+        for func_ctxt in self.get_func_iterator():
+            addr = self.get_func_addr(func_ctxt)
+            func_name = self.get_func_name(addr, func_ctxt)
+            logger.debug(f"Processing Function: {func_name}")
+            f = NativeFunction(
+                endianness=self.binary.endianness,
+                architecture=self.binary.architecture,
+                bitness=self.binary.bitness,
+                address=addr,
+                names=[func_name],
+                return_type=self.get_func_return_type(addr, func_ctxt),
+                argv=self.get_func_args(addr, func_ctxt),
+                thunk=self.is_func_thunk(addr, func_ctxt),
+                stack_frame_size=self.get_func_stack_frame_size(addr, func_ctxt),
+                variables=[v for v in self.get_func_vars(addr, func_ctxt)],
+            )
+            decompiled_code = self.get_func_decomp(addr, func_ctxt)
+
+            dsrc = None
+            if decompiled_code is not None:
+                dsrc = SourceFunction.from_code(
+                    fname=func_name, source=decompiled_code, is_decompiled=True
+                )
+                if dsrc is None:
+                    # Failed to parse source with tree sitter :(
+                    # Random notes: some disassemblers like to inject extra things into the decompiled source
+                    # i.e. it's not true C code.
+                    # e.g., adding annotations like 'processEntry': `void processEntry _start(undefined8 param_1,undefined8 param_2)``
+                    dsrc = SourceFunction(
+                        name=func_name,
+                        decompiled=True,
+                        source=decompiled_code,
+                    )
+
+                f.sources.add(dsrc)
+
+            xrefs = set(self.get_func_xrefs(addr, func_ctxt))
+            self._load_basic_blocks(addr, func_ctxt, f, xrefs.copy())
+
+            if len(f.basic_blocks) > 0:
+                f.end_block_addrs = set(
+                    (
+                        bb.address
+                        for bb, out_degree in f.cfg.out_degree()
+                        if out_degree == 0
+                    )
+                )
+            elif not f.thunk:
+                logger.warn(f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks")
+
+            funcs.add(f)
+
+        # 2nd pass to do callee/callers
+        for func_ctxt in self.get_func_iterator():
+            addr = self.get_func_addr(func_ctxt)
+            func_name = self.get_func_name(addr, func_ctxt)
+            f = self._func_addrs[addr]
+
+            f.called_by = set()
+            for caller_addr in self.get_func_callers(addr, func_ctxt):
+                f.called_by.add(caller_addr)
+
+            f.calls_addrs = set()
+            for callee_addr in self.get_func_callees(addr, func_ctxt):
+                f.calls_addrs.add(callee_addr)
+
+        return funcs
+
+    def _load_basic_blocks(
+        self, addr: int, func_ctxt: Any, f: NativeFunction, xrefs: Set[Reference]
+    ) -> None:
+        for bb_ctxt in self.get_func_bb_iterator(addr, func_ctxt):
+            bb_addr = self.get_bb_addr(bb_ctxt, func_ctxt)
+
+            bb = BasicBlock(
+                endianness=self.binary.endianness,
+                architecture=self.binary.architecture,
+                bitness=self.binary.bitness,
+                address=bb_addr,
+            )
+
+            for branch_data in self.get_next_bbs(bb_addr, bb_ctxt, addr, func_ctxt):
+                bb.branches.add(branch_data)
+
+            self._load_instructions(bb_addr, bb_ctxt, bb, func_ctxt)
+
+            for xref in xrefs:
+                if xref.from_ in bb or xref.to in bb:
+                    bb.xrefs.add(xref)
+            xrefs -= bb.xrefs
+
+            f.basic_blocks.add(bb)
+
+            if bb.address is None:
+                raise RuntimeError("No address associated with basic block")
+            f._block_lookup[bb.address] = bb
+            bb.set_function(f)
+
+            self._bbs[bb_addr] = bb
+
+        if len(xrefs) > 0 and len(f.basic_blocks) > 0:
+            logger.warn(f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}")
+
+    def _load_instructions(
+        self, bb_addr: int, bb_ctxt: Any, bb: BasicBlock, func_ctxt: Any
+    ) -> None:
+        cur_addr = bb_addr
+        for data, asm in self.get_bb_instructions(bb_addr, bb_ctxt, func_ctxt):
+            instr = Instruction(
+                endianness=self.binary.endianness,
+                architecture=self.binary.architecture,
+                bitness=self.binary.bitness,
+                address=cur_addr,
+                data=data,
+                asm=asm,
+                comment=self.get_instruction_comment(cur_addr),
+            )
+            ir = self.get_ir_from_instruction(cur_addr, instr)
+            instr.ir = ir
+            bb.instructions.append(instr)
+            self._instrs[cur_addr] = instr
+
+            cur_addr += len(data)
+
+    @functools.cache
+    def _strings(self, min_size: int = 4) -> Iterable[str]:
+        CHUNK_SIZE = 4096
+        MIN_BUFFER_SIZE = min_size + 1  # +1 to account for null terminator
+
+        strings = list()
+        printables = bytes(string.printable, "ascii")
+
+        buff = b""
+        try:
+            io_stream = self.binary.io()
+            while True:
+                chunk = io_stream.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                buff += chunk
+
+                i = 0
+                while len(buff) >= MIN_BUFFER_SIZE:
+                    while buff[i] in printables:
+                        i += 1
+
+                    if buff[i] == 0 and i > (min_size - 1):
+                        strings.append(str(buff[:i], "ascii"))
+                        buff = buff[i + 1 :]
+                    else:
+                        buff = buff[1:]
+                    i = 0
+        finally:
+            io_stream.close()
+
+        return strings

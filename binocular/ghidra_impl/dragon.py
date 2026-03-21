@@ -213,7 +213,7 @@ class Ghidra(GhidraBase):
         """Returns the base address the binary is based at"""
         return self.program.getImageBase().getOffset()
 
-    def get_strings(self, binary_io: typing.IO, file_size: int) -> typing.Iterable[str]:
+    def get_strings(self) -> typing.Iterable[str]:
         """Returns the list of defined strings in the binary"""
         return [
             d.getValue()

@@ -6,8 +6,6 @@ import struct
 import subprocess
 import threading
 import time
-import pathlib
-import typing_extensions
 from collections.abc import Iterable
 from enum import Enum
 from typing import IO, Any, List, Optional, Tuple
@@ -428,7 +426,7 @@ class GhidraLegacy(GhidraBase):
 
         return struct.unpack("!Q", self.rpc_pipe.request(PipeRPC.Command.BASE_ADDR))[0]
 
-    def get_strings(self, binary_io: IO, file_size: int) -> Iterable[str]:
+    def get_strings(self) -> Iterable[str]:
         """Returns the list of defined strings in the binary"""
         if self.rpc_pipe is None:
             raise PipeRPCNotOpened
