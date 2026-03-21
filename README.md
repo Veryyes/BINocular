@@ -37,6 +37,21 @@ disassemblers and provides:
 **List Avaliable Ghidra Versions to Install**
 ```shell
 $ binocular install ghidra -l 
+12.0.4
+12.0.3
+12.0.2
+12.0.1
+12.0
+11.4.3
+11.4.2
+11.4.1
+11.4
+11.3.2
+11.3.1
+11.3
+11.2.1
+11.2
+11.1.2
 11.1.1
 11.1
 11.0.3
@@ -48,6 +63,10 @@ $ binocular install ghidra -l
 10.3.2
 10.3.1
 10.3
+10.2.3
+10.2.2
+10.2.1
+10.2
 ```
 
 **Install Ghidra from Command Line**
@@ -103,11 +122,11 @@ All the basic primitives such as `Instruction`, `Basic Block`, and `NativeFuncti
 ```python
 from binocular import Ghidra
 
-with Ghidra() as g:
-    g.load("./test/example")
+with Ghidra("./test/example") as g:
+    g.analyze()
     b = g.binary
     
-    f = g.function_sym("fib")
+    f = b.function_sym("fib")
     bb = list(f.basic_blocks)[0]
     print(bb.model_dump_json())
 ```
@@ -118,109 +137,172 @@ with Ghidra() as g:
   "endianness": 0,
   "architecture": "x86",
   "bitness": 64,
-  "address": 1053275,
-  "pie": 3,
+  "address": 1053246,
   "instructions": [
     {
       "endianness": 0,
       "architecture": "x86",
       "bitness": 64,
-      "address": 1053275,
-      "data": "837dec01",
-      "asm": "CMP",
+      "address": 1053246,
+      "data": "f30f1efa",
+      "asm": "ENDBR64",
       "comment": "",
       "ir": {
         "lang_name": 2,
-        "data": "(unique, 0x4400, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0xdb00, 4) LOAD (const, 0x1b1, 4) , (unique, 0x4400, 8);(unique, 0x27600, 4) COPY (unique, 0xdb00, 4);(register, 0x200, 1) INT_LESS (unique, 0x27600, 4) , (const, 0x1, 4);(register, 0x20b, 1) INT_SBORROW (unique, 0x27600, 4) , (const, 0x1, 4);(unique, 0x27700, 4) INT_SUB (unique, 0x27600, 4) , (const, 0x1, 4);(register, 0x207, 1) INT_SLESS (unique, 0x27700, 4) , (const, 0x0, 4);(register, 0x206, 1) INT_EQUAL (unique, 0x27700, 4) , (const, 0x0, 4);(unique, 0x15080, 4) INT_AND (unique, 0x27700, 4) , (const, 0xff, 4);(unique, 0x15100, 1) POPCOUNT (unique, 0x15080, 4);(unique, 0x15180, 1) INT_AND (unique, 0x15100, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x15180, 1) , (const, 0x0, 1)"
+        "data": ""
       }
     },
     {
       "endianness": 0,
       "architecture": "x86",
       "bitness": 64,
-      "address": 1053279,
+      "address": 1053250,
+      "data": "55",
+      "asm": "PUSH",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x4f900, 8) COPY (register, 0x28, 8);(register, 0x20, 8) INT_SUB (register, 0x20, 8) , (const, 0x8, 8); ---  STORE (const, 0x1b1, 8) , (register, 0x20, 8) , (unique, 0x4f900, 8)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053251,
+      "data": "4889e5",
+      "asm": "MOV",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(register, 0x28, 8) COPY (register, 0x20, 8)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053254,
+      "data": "53",
+      "asm": "PUSH",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x4f900, 8) COPY (register, 0x18, 8);(register, 0x20, 8) INT_SUB (register, 0x20, 8) , (const, 0x8, 8); ---  STORE (const, 0x1b1, 8) , (register, 0x20, 8) , (unique, 0x4f900, 8)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053255,
+      "data": "4883ec18",
+      "asm": "SUB",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(register, 0x200, 1) INT_LESS (register, 0x20, 8) , (const, 0x18, 8);(register, 0x20b, 1) INT_SBORROW (register, 0x20, 8) , (const, 0x18, 8);(register, 0x20, 8) INT_SUB (register, 0x20, 8) , (const, 0x18, 8);(register, 0x207, 1) INT_SLESS (register, 0x20, 8) , (const, 0x0, 8);(register, 0x206, 1) INT_EQUAL (register, 0x20, 8) , (const, 0x0, 8);(unique, 0x58300, 8) INT_AND (register, 0x20, 8) , (const, 0xff, 8);(unique, 0x58400, 1) POPCOUNT (unique, 0x58300, 8);(unique, 0x58500, 1) INT_AND (unique, 0x58400, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x58500, 1) , (const, 0x0, 1)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053259,
+      "data": "897dec",
+      "asm": "MOV",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x8f00, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0xd400, 4) COPY (register, 0x38, 4); ---  STORE (const, 0x1b1, 4) , (unique, 0x8f00, 8) , (unique, 0xd400, 4)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053262,
+      "data": "837dec00",
+      "asm": "CMP",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x8f00, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0x23d00, 4) LOAD (const, 0x1b1, 4) , (unique, 0x8f00, 8);(unique, 0x7d100, 4) COPY (unique, 0x23d00, 4);(register, 0x200, 1) INT_LESS (unique, 0x7d100, 4) , (const, 0x0, 4);(register, 0x20b, 1) INT_SBORROW (unique, 0x7d100, 4) , (const, 0x0, 4);(unique, 0x7d300, 4) INT_SUB (unique, 0x7d100, 4) , (const, 0x0, 4);(register, 0x207, 1) INT_SLESS (unique, 0x7d300, 4) , (const, 0x0, 4);(register, 0x206, 1) INT_EQUAL (unique, 0x7d300, 4) , (const, 0x0, 4);(unique, 0x58300, 4) INT_AND (unique, 0x7d300, 4) , (const, 0xff, 4);(unique, 0x58400, 1) POPCOUNT (unique, 0x58300, 4);(unique, 0x58500, 1) INT_AND (unique, 0x58400, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x58500, 1) , (const, 0x0, 1)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053266,
       "data": "7507",
       "asm": "JNZ",
       "comment": "",
       "ir": {
         "lang_name": 2,
-        "data": "(unique, 0xe480, 1) BOOL_NEGATE (register, 0x206, 1); ---  CBRANCH (ram, 0x101268, 8) , (unique, 0xe480, 1)"
+        "data": "(unique, 0x24f00, 1) BOOL_NEGATE (register, 0x206, 1); ---  CBRANCH (ram, 0x10125b, 8) , (unique, 0x24f00, 1)"
       }
     }
   ],
   "branches": [
     {
-      "btype": 1,
-      "target": 1053288
+      "type": 1,
+      "target": 1053268
     },
     {
-      "btype": 1,
-      "target": 1053281
+      "type": 1,
+      "target": 1053275
     }
   ],
   "is_prologue": false,
   "is_epilogue": false,
   "xrefs": [
     {
-      "from_": 1053279,
-      "to": 1053288,
+      "from_": 1053266,
+      "to": 1053275,
       "type": 1
+    },
+    {
+      "from_": 1053447,
+      "to": 1053246,
+      "type": 2
+    },
+    {
+      "from_": 1057112,
+      "to": 1053246,
+      "type": 0
+    },
+    {
+      "from_": 0,
+      "to": 1053246,
+      "type": 0
+    },
+    {
+      "from_": 1053296,
+      "to": 1053246,
+      "type": 2
+    },
+    {
+      "from_": 1053259,
+      "to": -28,
+      "type": 4
+    },
+    {
+      "from_": 1056888,
+      "to": 1053246,
+      "type": 0
+    },
+    {
+      "from_": 1053262,
+      "to": -28,
+      "type": 3
+    },
+    {
+      "from_": 1053311,
+      "to": 1053246,
+      "type": 2
     }
   ]
 }
-```
 
-### Loading a Binary In and Upload to a Database
-Each primitive has a corresponding [SQLAlchemy](https://www.sqlalchemy.org/) ORM class that is suffixed with "ORM". (e.g. `NativeFunctionORM`, `BinaryORM`). 
-
-```python
-from sqlalchemy.orm import Session
-from binocular import Ghidra, Backend, FunctionSource
-
-Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
-
-# If no install_dir parameter is specified, it will use the baked in default path (inside the python package itself)
-with Ghidra() as g:
-    g.load("./test/example")
-    b = g.binary
-    
-    for f in b.functions:
-        name = f.names[0]
-
-        # Auto parse the source code and associate the functions within 
-        # the source to the parsed functions that Ghidra has found
-        src = FunctionSource.from_file(name, './test/example.c')
-        if src is not None:
-            f.sources.add(src)
-
-    # Load the entire binary to the database set in line 4
-    with Session(Backend.engine) as s:
-        b.db_add(s)
-        s.commit()
-
-```
-
-### Querying Data from a Database
-This is an example of querying a binary by name. This is all SQL/SQLAlchemy so make whatever queries you want.
-
-Use the `.from_orm()` function to lift the ORM object back to a Pydantic BaseModel object
-```python
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-from binocular import Backend, Binary
-from binocular.db import BinaryORM, NameORM
-
-Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
-
-with Session(Backend.engine) as session:
-    # Select a binary whoes file name has been "example"
-    binary = session.execute(
-        select(BinaryORM).join(NameORM, BinaryORM.names).where(NameORM.name == 'example')
-    ).all()
-    binary = [b[0] for b in binary][0]
-
-    # Convert the BinaryORM object to a Binary Object
-    # and get all its functions
-    funcs = Binary.from_orm(binary).functions
-    print(f"example has {len(funcs)} functions")
 ```

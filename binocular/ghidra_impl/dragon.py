@@ -5,7 +5,6 @@ import typing
 import functools
 import pathlib
 import typing_extensions
-import functools
 
 # https://github.com/NationalSecurityAgency/ghidra/pull/9030
 import pyghidra  # type: ignore[import-untyped]
@@ -88,7 +87,7 @@ class Ghidra(GhidraBase):
         if self._program is not None and (
             not self._program.isClosed() or self._consumer is not None
         ):
-            raise ResourceWarning(f"Unclosed ghidra program. Call close()")
+            raise ResourceWarning("Unclosed ghidra program. Call close()")
         self._program = prog
 
     @functools.cached_property
@@ -150,7 +149,9 @@ class Ghidra(GhidraBase):
             self.project_location, self.project_name, create=True
         )
         loader = (
-            pyghidra.program_loader().project(self.project_ctxt).source(self.bin_name)
+            pyghidra.program_loader()
+            .project(self.project_ctxt)
+            .source(str(self.binary_filepath))
         )
         with loader.load() as load_results:
             load_results.save(pyghidra.task_monitor())

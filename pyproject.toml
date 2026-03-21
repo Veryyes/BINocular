@@ -24,7 +24,6 @@ dependencies = [
     "tree-sitter-c==0.23.1",
     "requests",
     "IPython",
-    "sphinx",
     "pyghidra",
 ]
 

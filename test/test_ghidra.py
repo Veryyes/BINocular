@@ -52,6 +52,17 @@ def test_build_commit_2():
         assert Ghidra.is_installed(install_dir=tmpdirname)
 
 
+def test_binary_not_in_cwd(make):
+    assert Ghidra.is_installed()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        symlink = os.path.join(tmpdir, "example")
+        os.symlink(os.path.abspath("example"), symlink)
+
+        with Ghidra(symlink) as g:
+            g.analyze()
+            assert g.binary is not None
+
+
 def test_disassm(make):
     assert Ghidra.is_installed()
     with Ghidra("example") as g:
