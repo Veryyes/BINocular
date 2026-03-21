@@ -59,4 +59,5 @@ def test_serial_and_back(make):
         b_prime = Binary.model_validate(serialized)
 
         assert b.names[0] == b_prime.names[0]
+        assert len(b.functions) > 0
         assert len(b.functions) == len(b_prime.functions)

@@ -673,6 +673,9 @@ class Binary(NativeCode):
 
         raise Binary.NoDataException("Binary Object has no Path or data")
 
+    def model_post_init(self, context: Any, /) -> None:
+        self.build_indexes()
+
     def set_path(self, path: Union[Path, str]):
         if isinstance(path, str):
             path = Path(path)
@@ -761,7 +764,14 @@ class Binary(NativeCode):
 
         return None
 
-    def _build_indexes(self):
+    def build_indexes(self):
+        self._func_sorted.clear()
+        self._func_names.clear()
+        self._func_addrs.clear()
+        self._bbs.clear()
+        self._bbs_sorted.clear()
+        self._instrs.clear()
+
         for f in self.functions:
             f._binary = self
 

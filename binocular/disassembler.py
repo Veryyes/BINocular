@@ -326,7 +326,7 @@ class Disassembler(ABC):
         self._binary = self._load_binary()
         self._functions = self._load_functions()
         self._binary.functions = self._functions
-        self._binary._build_indexes()
+        self._binary.build_indexes()
 
         self.is_loaded = True
 
