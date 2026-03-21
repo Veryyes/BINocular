@@ -31,7 +31,6 @@ arches: List[Type] = [
     ArchARM,
     ArchARMCortexM,
     ArchARMEL,
-    ArchARMEL,
     ArchARMHF,
     ArchAVR8,
     ArchMIPS32,

@@ -304,16 +304,16 @@ class GhidraBase(Disassembler):
 
         self.ghidra_home: str
         if home is None:
-            ghidra_release_patttern = re.compile(r"ghidra_(\d+(\.\d+)*)_PUBLIC")
+            ghidra_release_pattern = re.compile(r"ghidra_(\d+(\.\d+)*)_PUBLIC")
             ghidra_dir = None
             for dir in os.listdir(self.DEFAULT_INSTALL()):
-                if ghidra_release_patttern.match(dir):
+                if ghidra_release_pattern.match(dir):
                     ghidra_dir = dir
                     break
 
             if ghidra_dir is None:
                 raise Exception(
-                    f"Unable to find Ghidra install directory inside of {self.ghidra_home}"
+                    f"Unable to find Ghidra install directory inside of {self.DEFAULT_INSTALL()}"
                 )
 
             self.ghidra_home = os.path.join(self.DEFAULT_INSTALL(), ghidra_dir)

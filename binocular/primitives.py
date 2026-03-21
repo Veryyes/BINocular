@@ -392,7 +392,7 @@ class NativeFunction(NativeCode):
             end = bbs[-1].address + len(bbs[-1]) - self._binary.base_addr
             return bytes(self._binary)[start:end]
 
-        return None
+        return b""
 
     def start(self):
         return self._block_lookup[self.address]

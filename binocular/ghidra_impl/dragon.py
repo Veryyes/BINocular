@@ -269,7 +269,7 @@ class Ghidra(GhidraBase):
             func_ctxt, self.decomp_timeout, self.monitor
         )
         if not res.decompileCompleted():
-            logger.warn(
+            logger.warning(
                 f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}"
             )
 
