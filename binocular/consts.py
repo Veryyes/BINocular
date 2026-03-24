@@ -25,6 +25,7 @@ class IL(Enum):
     VEX = 1
     ESIL = 2
     PCODE = 3
+    BNIL = 4
 
 
 class RefType(Enum):

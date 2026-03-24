@@ -26,6 +26,7 @@ from .primitives import (
     Variable,
 )
 from .rizin import Rizin
+from .binja import BinaryNinja
 
 __all__ = [
     "Argument",
@@ -39,6 +40,7 @@ __all__ = [
     "GhidraLegacy",
     "Ghidra",
     "Rizin",
+    "BinaryNinja",
     "Disassembler",
     "Endian",
     "BranchType",
