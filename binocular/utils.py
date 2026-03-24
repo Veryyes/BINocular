@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlsplit
 from archinfo import (
     ArchARM,
     ArchX86,
+    ArchAVR8,
     ArchSoot,
     ArchAMD64,
     ArchARMEL,
@@ -24,11 +25,6 @@ from archinfo import (
     ArchARMCortexM,
 )
 
-try:
-    from archinfo import ArchAVR8
-except ImportError:
-    ArchAVR8 = None
-
 arches: List[Type] = [
     ArchAArch64,
     ArchAMD64,
@@ -36,6 +32,7 @@ arches: List[Type] = [
     ArchARMCortexM,
     ArchARMEL,
     ArchARMHF,
+    ArchAVR8,
     ArchMIPS32,
     ArchMIPS64,
     ArchPPC32,
@@ -45,8 +42,6 @@ arches: List[Type] = [
     ArchSoot,
     ArchX86,
 ]
-if ArchAVR8 is not None:
-    arches.append(ArchAVR8)
 archinfo_lookup: Dict[str, Type] = defaultdict(lambda: ArchNotFound)
 
 for a in arches:

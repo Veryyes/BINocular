@@ -18,16 +18,14 @@ from .primitives import IR, Branch, Argument, Variable, Reference, Instruction
 # Lazy import: binaryninja is only imported when actually used
 _bn = None
 
-# Common install paths to search for the binaryninja Python module
-_BINJA_PYTHON_PATHS = [
-    "/opt/binaryninja/python",
-    os.path.expanduser("~/binaryninja/python"),
-    os.path.expanduser("~/.binaryninja/python"),
-]
-
 
 def _import_binja():
-    """Lazily import the binaryninja module, trying common paths if needed."""
+    """Lazily import the binaryninja module.
+
+    Tries a direct import first (works if the user ran Binary Ninja's
+    install_api.py or otherwise has the module on sys.path). Falls back
+    to the BN_INSTALL_DIR environment variable.
+    """
     global _bn
     if _bn is not None:
         return _bn
@@ -41,7 +39,7 @@ def _import_binja():
     except ImportError:
         pass
 
-    # Check environment variable
+    # Fall back to BN_INSTALL_DIR environment variable
     bn_dir = os.environ.get("BN_INSTALL_DIR")
     if bn_dir:
         py_path = os.path.join(bn_dir, "python")
@@ -55,21 +53,10 @@ def _import_binja():
             except ImportError:
                 pass
 
-    # Try common install paths
-    for path in _BINJA_PYTHON_PATHS:
-        if os.path.isdir(path) and path not in sys.path:
-            sys.path.insert(0, path)
-            try:
-                import binaryninja
-
-                _bn = binaryninja
-                return _bn
-            except ImportError:
-                sys.path.remove(path)
-
     raise ImportError(
-        "Cannot import binaryninja. Ensure Binary Ninja is installed and its Python "
-        "module is on sys.path, or set BN_INSTALL_DIR to the installation directory."
+        "Cannot import binaryninja. Either run Binary Ninja's install_api.py "
+        "to install the Python module, or set the BN_INSTALL_DIR environment "
+        "variable to your Binary Ninja installation directory."
     )
 
 

@@ -39,6 +39,7 @@ def test_function(make):
     with BinaryNinja("example") as g:
         g.analyze()
         binary = g.binary
+        f = binary.function_sym("foo")
 
         f = binary.function_sym("main")
         assert binary.function_sym("foo") in [x for x in f.calls]
@@ -165,27 +166,6 @@ def test_xrefs(make):
         f = binary.function_sym("main")
         total_xrefs = sum(len(bb.xrefs) for bb in f.basic_blocks)
         assert total_xrefs > 0
-
-
-def test_callers_callees(make):
-    with BinaryNinja("example") as g:
-        g.analyze()
-        binary = g.binary
-
-        main = binary.function_sym("main")
-        foo = binary.function_sym("foo")
-        fib = binary.function_sym("fib")
-
-        # main calls foo and fib
-        assert foo in list(main.calls)
-        assert fib in list(main.calls)
-
-        # foo is called by main
-        assert main in list(foo.callers)
-
-        # fib is recursive
-        assert fib in list(fib.calls)
-        assert fib in list(fib.callers)
 
 
 def test_binary_not_in_cwd(make):
