@@ -14,7 +14,9 @@ from . import logger
 from .disassembler import Disassembler
 from .consts import IL, Endian, BranchType, RefType
 from .primitives import IR, Branch, Argument, Variable, Reference, Instruction
-
+import typing
+if typing.TYPE_CHECKING:
+    import binaryninja
 # Lazy import: binaryninja is only imported when actually used
 _bn = None
 
@@ -90,7 +92,7 @@ class BinaryNinja(Disassembler):
 
     @classmethod
     def IL(cls) -> IL:
-        return IL.BNIL
+        return IL.LLIL # BinaryNinja implementation returns low level IL
 
     def __init__(
         self,
@@ -98,10 +100,10 @@ class BinaryNinja(Disassembler):
         verbose: bool = True,
     ) -> None:
         super().__init__(filepath=filepath, verbose=verbose)
-        self._bv: Any = None  # binaryninja.BinaryView
+        self._bv: binaryninja.BinaryView | None = None
 
     @property
-    def bv(self) -> Any:
+    def bv(self) -> binaryninja.BinaryView:
         if self._bv is not None:
             return self._bv
         raise self.NotOpenedError()
@@ -142,7 +144,12 @@ class BinaryNinja(Disassembler):
 
     @override
     def get_architecture(self) -> str:
-        return self.bv.arch.name
+        arch = self.bv.arch
+        if arch is None: # Only happens when no architecture is associated with the BinaryView. 
+            return "Unknown"
+        if arch.name is None:
+            return "Unnamed Architecture"
+        return arch.name
 
     @override
     def get_endianness(self) -> Endian:
@@ -174,20 +181,20 @@ class BinaryNinja(Disassembler):
     # -------------------------------------------------------
 
     @override
-    def get_func_iterator(self) -> Iterable[Any]:
+    def get_func_iterator(self) -> Iterable[binaryninja.Function]:
         for func in self.bv.functions:
             yield func
 
     @override
-    def get_func_addr(self, func_ctxt: Any) -> int:
+    def get_func_addr(self, func_ctxt: binaryninja.Function) -> int:
         return func_ctxt.start
 
     @override
-    def get_func_name(self, addr: int, func_ctxt: Any) -> str:
+    def get_func_name(self, addr: int, func_ctxt: binaryninja.Function) -> str:
         return func_ctxt.name
 
     @override
-    def get_func_args(self, addr: int, func_ctxt: Any) -> List[Argument]:
+    def get_func_args(self, addr: int, func_ctxt: binaryninja.Function) -> List[Argument]:
         args = []
         for param in func_ctxt.parameter_vars:
             args.append(
@@ -198,19 +205,17 @@ class BinaryNinja(Disassembler):
             )
 
         has_varargs = func_ctxt.has_variable_arguments
-        if hasattr(has_varargs, "value"):
-            has_varargs = has_varargs.value
-        if has_varargs:
+        if has_varargs.value:
             args.append(Argument(data_type=None, var_name=None, var_args=True))
 
         return args
 
     @override
-    def get_func_return_type(self, addr: int, func_ctxt: Any) -> str:
+    def get_func_return_type(self, addr: int, func_ctxt: binaryninja.Function) -> str:
         return str(func_ctxt.return_type)
 
     @override
-    def get_func_stack_frame_size(self, addr: int, func_ctxt: Any) -> int:
+    def get_func_stack_frame_size(self, addr: int, func_ctxt: binaryninja.Function) -> int:
         total = 0
         for var in func_ctxt.stack_layout:
             if var.type is not None:
@@ -218,11 +223,12 @@ class BinaryNinja(Disassembler):
         return total
 
     @override
-    def is_func_thunk(self, addr: int, func_ctxt: Any) -> bool:
+    def is_func_thunk(self, addr: int, func_ctxt: binaryninja.Function) -> bool:
+        return func_ctxt.is_thunk
         return func_ctxt.is_thunk
 
     @override
-    def get_func_decomp(self, addr: int, func_ctxt: Any) -> str | None:
+    def get_func_decomp(self, addr: int, func_ctxt: binaryninja.Function) -> str | None:
         try:
             hlil = func_ctxt.hlil
             if hlil is not None:
@@ -232,7 +238,7 @@ class BinaryNinja(Disassembler):
         return None
 
     @override
-    def get_func_vars(self, addr: int, func_ctxt: Any) -> Iterable[Variable]:
+    def get_func_vars(self, addr: int, func_ctxt: binaryninja.Function) -> Iterable[Variable]:
         bn = _import_binja()
         variables: List[Variable] = []
         for var in func_ctxt.vars:
@@ -254,12 +260,12 @@ class BinaryNinja(Disassembler):
         return variables
 
     @override
-    def get_func_callers(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+    def get_func_callers(self, addr: int, func_ctxt: binaryninja.Function) -> Iterable[int]:
         for caller in func_ctxt.callers:
             yield caller.start
 
     @override
-    def get_func_callees(self, addr: int, func_ctxt: Any) -> Iterable[int]:
+    def get_func_callees(self, addr: int, func_ctxt: binaryninja.Function) -> Iterable[int]:
         for callee in func_ctxt.callees:
             yield callee.start
 
@@ -270,7 +276,7 @@ class BinaryNinja(Disassembler):
         return RefType.JUMP
 
     @override
-    def get_func_xrefs(self, addr: int, func_ctxt: Any) -> Iterable[Reference]:
+    def get_func_xrefs(self, addr: int, func_ctxt: binaryninja.Function) -> Iterable[Reference]:
         for bb in func_ctxt.basic_blocks:
             cur_addr = bb.start
             for _tokens, size in bb:
@@ -298,21 +304,21 @@ class BinaryNinja(Disassembler):
     # -------------------------------------------------------
 
     @override
-    def get_func_bb_iterator(self, addr: int, func_ctxt: Any) -> Iterable[Any]:
+    def get_func_bb_iterator(self, addr: int, func_ctxt: binaryninja.Function) -> Iterable[binaryninja.BasicBlock]:
         for bb in func_ctxt.basic_blocks:
             yield bb
 
     @override
-    def get_bb_addr(self, bb_ctxt: Any, func_ctxt: Any) -> int:
+    def get_bb_addr(self, bb_ctxt: binaryninja.BasicBlock, func_ctxt: binaryninja.Function) -> int:
         return bb_ctxt.start
 
     @override
     def get_next_bbs(
         self,
         bb_addr: int,
-        bb_ctxt: Any,
+        bb_ctxt: binaryninja.BasicBlock,
         func_addr: int,
-        func_ctxt: Any,
+        func_ctxt: binaryninja.Function,
     ) -> Iterable[Branch]:
         bn = _import_binja()
         for edge in bb_ctxt.outgoing_edges:
@@ -330,7 +336,7 @@ class BinaryNinja(Disassembler):
 
     @override
     def get_bb_instructions(
-        self, bb_addr: int, bb_ctxt: Any, func_ctxt: Any
+        self, bb_addr: int, bb_ctxt: binaryninja.BasicBlock, func_ctxt: binaryninja.Function
     ) -> List[Tuple[bytes, str]]:
         instructions = []
         cur_addr = bb_ctxt.start
