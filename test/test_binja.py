@@ -139,7 +139,7 @@ def test_ir(make):
         found_bnil = False
         for bb in f.basic_blocks:
             for instr in bb.instructions:
-                if instr.ir is not None and instr.ir.lang_name == IL.BNIL:
+                if instr.ir is not None and instr.ir.lang_name == IL.LLIL:
                     found_bnil = True
                     assert len(instr.ir.data) > 0
                     break
