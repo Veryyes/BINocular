@@ -10,6 +10,7 @@
 
 ![Static Badge](https://img.shields.io/badge/Disassembler-Rizin-yellow)
 ![Static Badge](https://img.shields.io/badge/Disassembler-Ghidra-red)
+![Static Badge](https://img.shields.io/badge/Disassembler-BinaryNinja-blue)
 
 BINocular is a disassembler agnostic binary analysis framework written in python. It provides an common abstraction layer between different disassemblers.
 
@@ -26,6 +27,7 @@ Features Include:
 
 ## Disassembler Backend Support
 ### [Ghidra](https://www.ghidra-sre.org/)
+### [Binary Ninja](https://binary.ninja/)
 ### [Rizin](https://rizin.re/)
 
 ## Installation
