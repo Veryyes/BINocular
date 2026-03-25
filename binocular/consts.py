@@ -25,7 +25,7 @@ class IL(Enum):
     VEX = 1
     ESIL = 2
     PCODE = 3
-    LLIL= 4 # BinaryNinja implementation returns low level IL
+    LLIL = 4  # BinaryNinja implementation returns low level IL
 
 
 class RefType(Enum):
