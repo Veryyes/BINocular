@@ -51,3 +51,9 @@ packages = ["binocular"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "binocular/scripts" = "binocular/scripts"
+
+[tool.ruff]
+exclude = [
+    "test/ghidra_script_args.py",
+    "test/ghidra_script.py"
+]
