@@ -9,7 +9,7 @@ import typer
 import IPython
 from typing_extensions import Annotated
 
-from binocular import Rizin, Ghidra, Disassembler
+from binocular import Rizin, Ghidra, BinaryNinja, Disassembler
 
 app = typer.Typer()
 
@@ -17,6 +17,7 @@ app = typer.Typer()
 class DisassemblerChoice(Enum):
     rizin = "rizin"
     ghidra = "ghidra"
+    binja = "binja"
 
 
 @app.command()
@@ -39,6 +40,8 @@ def parse(
         disasm_type = Rizin
     elif disassm == DisassemblerChoice.ghidra:
         disasm_type = Ghidra
+    elif disassm == DisassemblerChoice.binja:
+        disasm_type = BinaryNinja
     else:
         raise ValueError("Not a supported Disassembler")
 
@@ -97,6 +100,8 @@ def install(
         disasm_type = Rizin
     elif disassm == DisassemblerChoice.ghidra:
         disasm_type = Ghidra
+    elif disassm == DisassemblerChoice.binja:
+        disasm_type = BinaryNinja
     else:
         raise ValueError("Not a supported Disassembler")
 
