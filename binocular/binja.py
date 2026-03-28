@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import pathlib
@@ -10,13 +11,15 @@ from typing import List, Tuple
 import typing_extensions
 from typing_extensions import override
 
-from . import logger
 from .disassembler import Disassembler
 from .consts import IL, Endian, BranchType, RefType
 from .primitives import IR, Branch, Argument, Variable, Reference, Instruction
 
 if typing.TYPE_CHECKING:
     import binaryninja
+
+logger = logging.getLogger("BINocular")
+
 # Lazy import: binaryninja is only imported when actually used
 _bn = None
 

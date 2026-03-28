@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import types
 import string
@@ -11,7 +12,6 @@ from typing import Any, Set, List, Type, Tuple
 
 import typing_extensions
 
-from . import logger
 from .consts import Endian
 from .primitives import (
     IR,
@@ -26,6 +26,8 @@ from .primitives import (
     NativeFunction,
     SourceFunction,
 )
+
+logger = logging.getLogger("BINocular")
 
 
 class Disassembler(ABC):

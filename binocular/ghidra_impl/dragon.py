@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import typing
 import functools
@@ -25,7 +26,7 @@ from ..consts import IL, BranchType, Endian, RefType
 from ..disassembler import Disassembler
 from ..primitives import IR, Argument, Branch, Instruction, Reference, Variable
 
-from .. import logger
+logger = logging.getLogger("BINocular")
 
 DEFAULT_DECOMP_TIMEOUT_S = 60 * 10
 

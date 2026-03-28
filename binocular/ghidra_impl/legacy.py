@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 import socket
@@ -12,10 +13,11 @@ from typing import List, Tuple
 from typing_extensions import override
 from collections.abc import Iterable
 
-from .. import logger
 from .core import GhidraBase
 from ..consts import IL, Endian, RefType, BranchType
 from ..primitives import IR, Branch, Argument, Variable, Reference, Instruction
+
+logger = logging.getLogger("BINocular")
 
 
 class PipeRPCNotOpened(Exception):

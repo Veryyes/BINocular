@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import json
@@ -10,20 +11,20 @@ import pathlib
 import pkgutil
 import zipfile
 import tempfile
-from typing_extensions import override
-
 from urllib.request import urlopen
 from collections import OrderedDict
+from typing_extensions import override
 
 import git
 from git import Repo
 import typing_extensions
 import requests  # type: ignore[import-untyped]
 
-from .. import logger
 from ..utils import run_proc
 from ..disassembler import Disassembler
 from ..consts import IL
+
+logger = logging.getLogger("BINocular")
 
 
 def gzf_project_name(gzf_path: pathlib.Path) -> str | None:

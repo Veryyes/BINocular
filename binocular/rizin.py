@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import json
 import lzma
@@ -21,11 +22,12 @@ from git import Repo
 import typing_extensions
 import requests  # type: ignore[import-untyped]
 
-from . import logger
 from .utils import run_proc
 from .disassembler import Disassembler
 from .consts import IL, Endian, BranchType
 from .primitives import IR, Branch, RefType, Argument, Variable, Reference, Instruction
+
+logger = logging.getLogger("BINocular")
 
 
 class Rizin(Disassembler):
