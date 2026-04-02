@@ -404,6 +404,8 @@ class Ghidra(GhidraBase):
     def get_func_xrefs(
         self, addr: int, func_ctxt: ghidra.program.model.listing.Function
     ) -> typing.Iterable[Reference]:
+        import ghidra.program.model.symbol
+
         for addr in func_ctxt.getBody().getAddresses(True):
             from_refs = self.ref_manager.getReferencesFrom(addr)
             for ref in from_refs:
@@ -440,6 +442,8 @@ class Ghidra(GhidraBase):
         The return type is left up to implementation to avoid any weird redundant analysis or
         any weirdness with how a disassembler's API may work.
         """
+        import ghidra.program.model.block
+
         blocks = self.bb_model.getCodeBlocksContaining(
             func_ctxt.getBody(), self.monitor
         )

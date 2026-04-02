@@ -402,9 +402,7 @@ class Disassembler(ABC):
                     )
                 )
             elif not f.thunk:
-                logger.warning(
-                    f"[{self.name()}] {func_name} @ {addr} has 0 Basic Blocks"
-                )
+                logger.warning(f"[{self.name}] {func_name} @ {addr} has 0 Basic Blocks")
 
             funcs.add(f)
 
@@ -452,9 +450,7 @@ class Disassembler(ABC):
             bb.set_function(f)
 
         if len(xrefs) > 0 and len(f.basic_blocks) > 0:
-            logger.warning(
-                f"[{self.name()}] {len(xrefs)} XRefs not in function: {xrefs}"
-            )
+            logger.warning(f"[{self.name}] {len(xrefs)} XRefs not in function: {xrefs}")
 
     def _load_instructions(
         self, bb_addr: int, bb_ctxt: Any, bb: BasicBlock, func_ctxt: Any

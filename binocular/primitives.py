@@ -404,8 +404,32 @@ class NativeFunction(NativeCode):
 
         return b""
 
-    def start(self):
-        return self._block_lookup[self.address]
+    def start(self) -> BasicBlock:
+        if self.address is None:
+            # No function address defined — fall back to the basic block with the smallest address
+            if any(addr is None for addr in self._block_lookup):
+                raise ValueError(
+                    "No start defined: one or more basic blocks have no address"
+                )
+            if not self._block_lookup:
+                raise ValueError("No start defined: function has no basic blocks")
+            return self._block_lookup[min(self._block_lookup)]
+
+        bb = self._block_lookup.get(self.address, None)
+        if bb is not None:
+            return bb
+
+        # Edge case, but saw this with the debug info where a frame descriptor entry's PcBegin pointed
+        # two bytes into the the first basic block of a thunk function and a function was defined there,
+        # nested within the thunk. Technically by the debug info, that is where the function starts,
+        # but this breaks the assumption that the address of the first basic block is the address of the function
+        # so we just clap to the function start
+        candidates = [addr for addr in self._block_lookup if addr < self.address]
+        if not candidates:
+            raise ValueError(
+                f"No basic block found at or before function address {self.address:#x}"
+            )
+        return self._block_lookup[max(candidates)]
 
     def end(self):
         return [self._block_lookup[e] for e in self.end_block_addrs]
