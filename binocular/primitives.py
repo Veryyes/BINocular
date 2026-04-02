@@ -8,11 +8,11 @@ import tempfile
 from pathlib import Path
 from collections import defaultdict
 from functools import cached_property
-from typing import IO, Any, Set, Dict, List, Type, Tuple, Union
+from typing import IO, Any, Set, Dict, List, Type, Tuple, Union, Generator
 
 import pyvex
 import networkx as nx
-from typing_extensions import Annotated
+from typing_extensions import Annotated, Self
 from pydantic.functional_validators import PlainValidator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic import BaseModel, computed_field, model_validator
@@ -91,10 +91,10 @@ class Reference(BaseModel):
     to: int
     type: RefType
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.from_, self.to, self.type.value))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
 
 
@@ -117,7 +117,7 @@ class Argument(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def from_literal(cls, data: Any) -> Any:
+    def from_literal(cls, data: Any) -> Self:
         if isinstance(data, str):
             data = data.strip()
 
@@ -136,7 +136,7 @@ class Argument(BaseModel):
             )
         return data
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.var_args:
             return "..."
 
@@ -178,29 +178,31 @@ class Instruction(NativeCode):
     comment: str | None = ""
     ir: IR | None = None
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def __eq__(self, other: object):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Instruction):
             return False
 
         return self.data == other.data
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.data)
 
-    def __contains__(self, x: bytes):
+    def __contains__(self, x: bytes) -> bool:
         return x in self.data
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         return self.data
 
-    def vex(self):
+    def vex(self) -> IR:
         address = self.address
         if address is None:
             address = 0
 
+        if self.architecture is None:
+            raise ValueError("Cannot lift VEX IR: architecture is unknown")
         il = pyvex.lift(self.data, address, str2archinfo(self.architecture))
         return IR(
             lang_name=IL.VEX, data=";".join([stmt.pp_str() for stmt in il.statements])
@@ -235,7 +237,7 @@ class BasicBlock(NativeCode):
             for bb in block._function.basic_blocks:
                 self.block_cache[bb.address] = bb
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         def __next__(self) -> Tuple[BranchType, Union[IndirectToken, int, BasicBlock]]:
@@ -260,18 +262,18 @@ class BasicBlock(NativeCode):
             self.idx += 1
             return btype, dest
 
-    def __iter__(self):
+    def __iter__(self) -> BasicBlock.BasicBlockIterator:
         return BasicBlock.BasicBlockIterator(self)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(bytes(self))
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self._size_bytes is None:
             self._size_bytes = sum([len(i) for i in self.instructions])
         return self._size_bytes
 
-    def __contains__(self, x: Union[Instruction, bytes, int]):
+    def __contains__(self, x: Union[Instruction, bytes, int]) -> bool:
         if isinstance(x, Instruction):
             return x in self.instructions
         elif isinstance(x, bytes):
@@ -285,7 +287,7 @@ class BasicBlock(NativeCode):
             return x >= self.address and x < end
         raise TypeError
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         b = b""
         for instr in self.instructions:
             b += instr.data
@@ -303,10 +305,10 @@ class BasicBlock(NativeCode):
             return None
         return self.address + len(self)
 
-    def set_function(self, func: NativeFunction):
+    def set_function(self, func: NativeFunction) -> None:
         self._function = func
 
-    def num_instructions(self):
+    def num_instructions(self) -> int:
         return len(self.instructions)
 
     def vex(self) -> IR | None:
@@ -360,13 +362,14 @@ class NativeFunction(NativeCode):
     end_block_addrs: Set[int] = set([])
 
     @model_validator(mode="after")
-    def _populate_cache(self):
+    def _populate_cache(self) -> Self:
         for bb in self.basic_blocks:
-            self._block_lookup[bb.address] = bb
+            if bb.address is not None:
+                self._block_lookup[bb.address] = bb
             bb._function = self
         return self
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return int(self.sha256, 16)
 
     def __eq__(self, other: object) -> bool:
@@ -378,7 +381,7 @@ class NativeFunction(NativeCode):
     def __ne__(self, other: object) -> bool:
         return hash(self) != hash(other)
 
-    def __contains__(self, x: Union[BasicBlock, Instruction, bytes]):
+    def __contains__(self, x: Union[BasicBlock, Instruction, bytes]) -> bool:
         if isinstance(x, BasicBlock):
             return x in self.basic_blocks
         elif isinstance(x, Instruction) or isinstance(x, bytes):
@@ -392,14 +395,18 @@ class NativeFunction(NativeCode):
     def __repr__(self) -> str:
         return str(self)
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         """Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
-        bbs = sorted(bbs, key=lambda b: b.address)
+        bbs = sorted(bbs, key=lambda b: b.address if b.address is not None else 0)
 
         if self._binary is not None:
-            start = bbs[0].address - self._binary.base_addr
-            end = bbs[-1].address + len(bbs[-1]) - self._binary.base_addr
+            start_addr = bbs[0].address
+            end_addr = bbs[-1].address
+            if start_addr is None or end_addr is None:
+                return b""
+            start = start_addr - self._binary.base_addr
+            end = end_addr + len(bbs[-1]) - self._binary.base_addr
             return bytes(self._binary)[start:end]
 
         return b""
@@ -431,7 +438,7 @@ class NativeFunction(NativeCode):
             )
         return self._block_lookup[max(candidates)]
 
-    def end(self):
+    def end(self) -> List[BasicBlock]:
         return [self._block_lookup[e] for e in self.end_block_addrs]
 
     @property
@@ -441,7 +448,7 @@ class NativeFunction(NativeCode):
         return self.names[0]
 
     @property
-    def calls(self):
+    def calls(self) -> Generator[NativeFunction, None, None]:
         """Functions that this Function Calls"""
         if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
@@ -452,7 +459,7 @@ class NativeFunction(NativeCode):
                 yield f
 
     @property
-    def callers(self):
+    def callers(self) -> Generator[NativeFunction, None, None]:
         """Functions that call this Function"""
         if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
@@ -572,7 +579,7 @@ class SourceFunction(BaseModel):
         encoding: str = "utf8",
         lang: str = "C",
         is_decompiled=False,
-    ):
+    ) -> Self | None:
         """
         Parse a function from the given file and create a SourceFunction object
         :param fname: the function name
@@ -599,7 +606,7 @@ class SourceFunction(BaseModel):
         encoding: str = "utf8",
         lang: str = "C",
         is_decompiled=False,
-    ):
+    ) -> Self | None:
         """
         Parse a function from the source code and create a SourceFunction object
         :param fname: the function name
@@ -632,7 +639,7 @@ class SourceFunction(BaseModel):
         function_source._tree_sitter_root = f_root
         return function_source
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return int(self.sha256, 16)
 
     @computed_field(repr=False)  # type: ignore[misc]
@@ -655,11 +662,11 @@ class Binary(NativeCode):
     _size: int | None = None
 
     functions: Set[NativeFunction] = set()
-    _func_sorted: List[NativeFunction] = list()
+    _func_sorted: List[int] = list()
     _func_names: Dict[str, NativeFunction] = dict()
     _func_addrs: Dict[int, NativeFunction] = dict()
     _bbs: Dict[int, BasicBlock] = dict()
-    _bbs_sorted: List[BasicBlock] = list()
+    _bbs_sorted: List[int] = list()
     _instrs: Dict[int, Instruction] = dict()
 
     filename: str | List[str] | None = None
@@ -677,7 +684,7 @@ class Binary(NativeCode):
     # Strings from String table if they exists, otherwise strings detected in the binary (like unix `strings`` command)
     strings: Set[str] = set([])
 
-    def __len__(self):
+    def __len__(self) -> int:
         """returns the size of the binary in bytes"""
         if self._size is None:
             if self._path is not None:
@@ -687,18 +694,21 @@ class Binary(NativeCode):
 
         return self._size
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return int(self.sha256, 16)
 
-    def __contains__(self, x: Union[NativeFunction, BasicBlock, Instruction, bytes]):
+    def __contains__(
+        self, x: Union[NativeFunction, BasicBlock, Instruction, bytes]
+    ) -> bool:
         if isinstance(x, NativeFunction):
             return x in self.functions
         elif isinstance(x, BasicBlock) or isinstance(x, Instruction):
             return any([x in f for f in self.functions])
         elif isinstance(x, bytes):
             return x in bytes(self)
+        return False
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         """return the raw bytes of the binary"""
         if self._bytes is not None:
             return self._bytes
@@ -713,7 +723,7 @@ class Binary(NativeCode):
     def model_post_init(self, context: Any, /) -> None:
         self.build_indexes()
 
-    def set_path(self, path: Union[Path, str]):
+    def set_path(self, path: Union[Path, str]) -> None:
         if isinstance(path, str):
             path = Path(path)
         self._path = path
@@ -801,7 +811,7 @@ class Binary(NativeCode):
 
         return None
 
-    def build_indexes(self):
+    def build_indexes(self) -> None:
         self._func_sorted.clear()
         self._func_names.clear()
         self._func_addrs.clear()
@@ -820,11 +830,13 @@ class Binary(NativeCode):
                 self._func_addrs[f.address] = f
 
             for bb in f.basic_blocks:
-                self._bbs[bb.address] = bb
-                self._bbs_sorted.append(bb.address)
+                if bb.address is not None:
+                    self._bbs[bb.address] = bb
+                    self._bbs_sorted.append(bb.address)
 
                 for instr in bb.instructions:
-                    self._instrs[instr.address] = instr
+                    if instr.address is not None:
+                        self._instrs[instr.address] = instr
 
         self._func_sorted = list(self._func_addrs)
         self._func_sorted.sort()
