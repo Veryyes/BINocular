@@ -447,6 +447,25 @@ class NativeFunction(NativeCode):
             return "N/A"
         return self.names[0]
 
+    def add_name(self, name: str) -> None:
+        if self.names is None:
+            self.names = []
+        if name in self.names:
+            return
+        self.names.append(name)
+        if self._binary is not None:
+            self._binary._func_names[name] = self
+
+    def remove_name(self, name: str) -> None:
+        if self.names is None or name not in self.names:
+            return
+        was_primary = self.names[0] == name
+        self.names.remove(name)
+        if self._binary is not None:
+            self._binary._func_names.pop(name, None)
+            if was_primary and self.names:
+                self._binary._func_names[self.names[0]] = self
+
     @property
     def calls(self) -> Generator[NativeFunction, None, None]:
         """Functions that this Function Calls"""
