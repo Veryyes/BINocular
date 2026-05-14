@@ -278,7 +278,7 @@ class Ghidra(GhidraBase):
         )
         if not res.decompileCompleted():
             logger.warning(
-                f"[{self.name()}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}"
+                f"[{self.name}] Unable to Decompile {func_ctxt.getName()}() {res.getErrorMessage()}"
             )
 
         return res
