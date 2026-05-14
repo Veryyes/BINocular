@@ -680,6 +680,8 @@ class Binary(NativeCode):
     dynamic_libs: Set[str] = set([])
     compiler: str | None = None
     compilation_flags: str | None = None
+    is_stripped: bool | None = None
+    has_debug_info: bool | None = None
 
     # Strings from String table if they exists, otherwise strings detected in the binary (like unix `strings`` command)
     strings: Set[str] = set([])

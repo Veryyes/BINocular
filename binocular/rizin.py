@@ -270,6 +270,18 @@ class Rizin(Disassembler):
         return [lib for lib in self.pipe.cmdj("ilj")]
 
     @override
+    def is_stripped(self) -> bool:
+        return bool(self.bin_info.get("stripped", True))
+
+    @override
+    def has_debug_info(self) -> bool:
+        for section in self.pipe.cmdj("iSj"):
+            name = section.get("name", "")
+            if name.startswith((".debug", ".zdebug", "__debug")):
+                return True
+        return False
+
+    @override
     def get_func_iterator(self) -> Iterable[Dict[str, Any]]:
         """
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data)

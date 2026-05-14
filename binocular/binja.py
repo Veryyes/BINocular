@@ -181,6 +181,22 @@ class BinaryNinja(Disassembler):
     def get_dynamic_libs(self) -> Iterable[str]:
         return [lib.name for lib in self.bv.get_external_libraries()]
 
+    @override
+    def is_stripped(self) -> bool:
+        bn = _import_binja()
+        # Non-auto symbols originate from the binary's symbol table; auto symbols are BN-generated names like sub_xxxxxxxx
+        for sym in self.bv.get_symbols_of_type(bn.SymbolType.FunctionSymbol):
+            if not sym.auto:
+                return False
+        return True
+
+    @override
+    def has_debug_info(self) -> bool:
+        for name in self.bv.sections:
+            if name.startswith((".debug", ".zdebug", "__debug")):
+                return True
+        return False
+
     # -------------------------------------------------------
     # Function iteration
     # -------------------------------------------------------

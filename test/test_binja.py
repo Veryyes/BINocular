@@ -86,6 +86,18 @@ def test_dynamic_libs(make):
         assert len(b.dynamic_libs) > 0
 
 
+def test_is_stripped(make):
+    with BinaryNinja("example") as g:
+        g.analyze()
+        assert g.is_stripped() is False
+
+
+def test_has_debug_info(make):
+    with BinaryNinja("example") as g:
+        g.analyze()
+        assert g.has_debug_info() is True
+
+
 def test_basic_blocks(make):
     with BinaryNinja("example") as g:
         g.analyze()

@@ -43,6 +43,20 @@ def test_disassm(make):
             assert f0 == f1
 
 
+def test_is_stripped(make):
+    with Rizin("example") as g:
+        assert g.is_installed()
+        g.analyze()
+        assert g.is_stripped() is False
+
+
+def test_has_debug_info(make):
+    with Rizin("example") as g:
+        assert g.is_installed()
+        g.analyze()
+        assert g.has_debug_info() is True
+
+
 def test_function(make):
     with Rizin("example") as g:
         assert g.is_installed()

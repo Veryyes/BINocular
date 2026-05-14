@@ -230,6 +230,16 @@ class Disassembler(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def is_stripped(self) -> bool:
+        """Returns whether the binary has been stripped of debug symbols"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def has_debug_info(self) -> bool:
+        """Returns whether the binary contains debug information"""
+        raise NotImplementedError
+
+    @abstractmethod
     def get_func_iterator(self) -> Iterable[Any]:
         """
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data)
@@ -345,6 +355,8 @@ class Disassembler(ABC):
             bitness=self.get_bitness(),
             base_addr=self.get_base_address(),
             dynamic_libs=self.get_dynamic_libs(),
+            is_stripped=self.is_stripped(),
+            has_debug_info=self.has_debug_info(),
         )
         b.set_path(self.binary_filepath)
         b.strings |= set(self.get_strings())

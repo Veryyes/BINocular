@@ -244,6 +244,40 @@ class Ghidra(GhidraBase):
         return dyn_libs
 
     @typing_extensions.override
+    def is_stripped(self) -> bool:
+        from ghidra.program.model.symbol import SourceType
+
+        memory = self.program.getMemory()
+        # ELF: static symbol table is absent when stripped
+        if memory.getBlock(".symtab") is not None:
+            return False
+        # MachO: nlist-based symbol table
+        if memory.getBlock("__symbol_table") is not None:
+            return False
+        # Fallback: any non-thunk function with an imported/user-defined symbol → not stripped
+        sym_table = self.program.getSymbolTable()
+        for func in self.func_manager.getFunctions(True):
+            if func.isThunk():
+                continue
+            sym = sym_table.getPrimarySymbol(func.getEntryPoint())
+            if sym is not None and sym.getSource() == SourceType.IMPORTED:
+                return False
+        return True
+
+    @typing_extensions.override
+    def has_debug_info(self) -> bool:
+        memory = self.program.getMemory()
+        for block in memory.getBlocks():
+            name = block.getName()
+            if (
+                name.startswith(".debug")
+                or name.startswith(".zdebug")
+                or name.startswith("__debug")
+            ):
+                return True
+        return False
+
+    @typing_extensions.override
     def get_func_iterator(
         self,
     ) -> typing.Iterable[ghidra.program.model.listing.Function]:
