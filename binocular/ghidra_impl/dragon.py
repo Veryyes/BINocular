@@ -183,6 +183,21 @@ class Ghidra(GhidraBase):
         super().analyze()
         self.analysis_log = pyghidra.analyze(self.program)
 
+    def export_gzf(self, output_path: pathlib.Path | str) -> pathlib.Path:
+        """Export the loaded program to a Ghidra Zip File (.gzf)."""
+        from ghidra.app.util.exporter import GzfExporter  # type: ignore[import-untyped]
+        from java.io import File as JFile  # type: ignore[import-untyped]
+
+        output_path = pathlib.Path(output_path)
+        if output_path.suffix != ".gzf":
+            output_path = output_path.with_suffix(".gzf")
+
+        exporter = GzfExporter()
+        exporter.export(
+            JFile(str(output_path.resolve())), self.program, None, self.monitor
+        )
+        return output_path
+
     def get_binary_name(self) -> str:
         """Returns the name of the binary loaded"""
         return self.program.getName()

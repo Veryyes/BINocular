@@ -1,9 +1,11 @@
 import itertools
 import os
+import pathlib
 import tempfile
 from urllib.request import urlopen
 
 from binocular import Ghidra
+from binocular.ghidra_impl.core import gzf_project_name
 
 
 def test_install_release_12():
@@ -146,3 +148,29 @@ def test_script_java(make):
         g.analyze()
         stdout = g.run_script("HelloWorld.java", 10)
     assert "Hello, World!" in stdout
+
+
+def test_export_gzf(make):
+    assert Ghidra.is_installed()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = pathlib.Path(tmpdir) / "example.gzf"
+        with Ghidra("example") as g:
+            g.analyze()
+            result = g.export_gzf(out)
+
+        assert result == out
+        assert result.exists()
+        assert result.suffix == ".gzf"
+        assert gzf_project_name(result) == "example"
+
+
+def test_export_gzf_adds_suffix(make):
+    assert Ghidra.is_installed()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = pathlib.Path(tmpdir) / "example"
+        with Ghidra("example") as g:
+            g.analyze()
+            result = g.export_gzf(out)
+
+        assert result.suffix == ".gzf"
+        assert result.exists()
