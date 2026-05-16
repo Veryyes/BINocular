@@ -114,11 +114,25 @@ def test_is_stripped(make):
         assert g.is_stripped() is False
 
 
+def test_is_stripped_true(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example_stripped") as g:
+        g.analyze()
+        assert g.is_stripped() is True
+
+
 def test_has_debug_info(make):
     assert Ghidra.is_installed()
     with Ghidra("example") as g:
         g.analyze()
         assert g.has_debug_info() is True
+
+
+def test_has_debug_info_false(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example_stripped") as g:
+        g.analyze()
+        assert g.has_debug_info() is False
 
 
 def test_script(make):

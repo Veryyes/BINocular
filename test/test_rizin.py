@@ -50,11 +50,25 @@ def test_is_stripped(make):
         assert g.is_stripped() is False
 
 
+def test_is_stripped_true(make):
+    with Rizin("example_stripped") as g:
+        assert g.is_installed()
+        g.analyze()
+        assert g.is_stripped() is True
+
+
 def test_has_debug_info(make):
     with Rizin("example") as g:
         assert g.is_installed()
         g.analyze()
         assert g.has_debug_info() is True
+
+
+def test_has_debug_info_false(make):
+    with Rizin("example_stripped") as g:
+        assert g.is_installed()
+        g.analyze()
+        assert g.has_debug_info() is False
 
 
 def test_function(make):

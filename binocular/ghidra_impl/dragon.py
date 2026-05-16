@@ -260,23 +260,44 @@ class Ghidra(GhidraBase):
 
     @typing_extensions.override
     def is_stripped(self) -> bool:
-        from ghidra.program.model.symbol import SourceType
+        from ghidra.program.model.symbol import SourceType, SymbolType
 
         memory = self.program.getMemory()
-        # ELF: static symbol table is absent when stripped
-        if memory.getBlock(".symtab") is not None:
+
+        # ELF: .symtab is definitively absent when stripped — no fallback needed.
+        # (Ghidra also creates IMPORTED symbols from ELF dynamic metadata like e_entry and
+        # DT_INIT that would produce false negatives if the iterator ran on ELF binaries.)
+        if "ELF" in self.program.getExecutableFormat():
+            return memory.getBlock(".symtab") is None
+
+        # PE: embedded CodeView debug sections (.debug$S / .debug$T) indicate not stripped
+        if (
+            memory.getBlock(".debug$S") is not None
+            or memory.getBlock(".debug$T") is not None
+        ):
             return False
-        # MachO: nlist-based symbol table
-        if memory.getBlock("__symbol_table") is not None:
-            return False
-        # Fallback: any non-thunk function with an imported/user-defined symbol → not stripped
+
+        # MachO / PE fallback: any IMPORTED function symbol that is not an external import
+        # or an import stub indicates the binary has its own symbol table.
+        _STUB_BLOCKS = {"__TEXT.__stubs", "__TEXT.__stub_helper"}
         sym_table = self.program.getSymbolTable()
-        for func in self.func_manager.getFunctions(True):
-            if func.isThunk():
+        for sym in sym_table.getSymbolIterator():
+            if sym.getSymbolType() != SymbolType.FUNCTION:
                 continue
-            sym = sym_table.getPrimarySymbol(func.getEntryPoint())
-            if sym is not None and sym.getSource() == SourceType.IMPORTED:
-                return False
+            if sym.getSource() != SourceType.IMPORTED:
+                continue
+            if sym.isExternal():
+                continue
+            addr = sym.getAddress()
+            block = memory.getBlock(addr)
+            block_name = block.getName() if block is not None else ""
+            if block_name in _STUB_BLOCKS:
+                continue
+            func = self.func_manager.getFunctionAt(addr)
+            if func is not None and func.isThunk():
+                continue
+            return False
+
         return True
 
     @typing_extensions.override

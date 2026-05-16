@@ -92,10 +92,22 @@ def test_is_stripped(make):
         assert g.is_stripped() is False
 
 
+def test_is_stripped_true(make):
+    with BinaryNinja("example_stripped") as g:
+        g.analyze()
+        assert g.is_stripped() is True
+
+
 def test_has_debug_info(make):
     with BinaryNinja("example") as g:
         g.analyze()
         assert g.has_debug_info() is True
+
+
+def test_has_debug_info_false(make):
+    with BinaryNinja("example_stripped") as g:
+        g.analyze()
+        assert g.has_debug_info() is False
 
 
 def test_basic_blocks(make):
