@@ -17,7 +17,7 @@ BINocular is a disassembler agnostic binary analysis framework written in python
 Features Include: 
 - Disassembler Agnostic Representation of Common Binary Analysis Primitives and Concepts
   * Assembly Instructions
-  * Intermediate Representations (e.g., pcode)
+  * Intermediate Representations (VEX, ESIL, PCODE, LLIL)
   * Functions
     - Compiled
     - Source
@@ -27,6 +27,16 @@ Features Include:
 
 ## Disassembler Backend Support
 ### [Ghidra](https://www.ghidra-sre.org/)
+BINocular ships two Ghidra classes:
+- **`Ghidra`** — for Ghidra ≥ 12.0.0; uses `pyghidra` for direct JVM interop (faster, no subprocess)
+- **`GhidraLegacy`** — for Ghidra < 12.0.0; communicates via a socket-based RPC subprocess
+
+Both expose the same API. Import the one that matches your installed Ghidra version:
+```python
+from binocular import Ghidra       # >= 12.0.0
+from binocular import GhidraLegacy # <  12.0.0
+```
+
 ### [Binary Ninja](https://binary.ninja/)
 ### [Rizin](https://rizin.re/)
 
@@ -100,6 +110,48 @@ if not Ghidra.is_installed(install_dir=install_dir):
     # Install Ghidra @ commit dee48e9 if Ghidra isn't installed already
     # This make take a while since it does build Ghidra from scratch
     Ghidra.install(version='dee48e9', install_dir=install_dir, build=True)
+```
+
+### Renaming a Function
+
+`rename_function()` updates the function name in the disassembler and propagates the change to the `Binary` object's lookup indexes.
+
+```python
+from binocular import Ghidra
+
+with Ghidra("./test/example") as g:
+    g.analyze()
+    g.rename_function(0x101249, "my_fib")
+    b = g.binary
+    f = b.function_sym("my_fib")  # lookup by new name works immediately
+    print(f.name)  # my_fib
+```
+
+### Exporting a Ghidra Zip File (GZF)
+
+`export_gzf()` saves the analyzed program as a `.gzf` file that can be re-imported into Ghidra without re-running analysis. Available on `Ghidra` (≥ 12.0.0) only.
+
+```python
+from binocular import Ghidra
+
+with Ghidra("./test/example") as g:
+    g.analyze()
+    out = g.export_gzf("./example.gzf")
+    print(out)  # PosixPath('example.gzf')
+```
+
+### Call Graph
+
+`binary.call_graph` returns a [NetworkX](https://networkx.org/) `DiGraph` where each node is a `NativeFunction` and edges represent calls.
+
+```python
+import networkx as nx
+from binocular import Ghidra
+
+with Ghidra("./test/example") as g:
+    g.analyze()
+    cg = g.binary.call_graph
+    print(nx.info(cg))
 ```
 
 ### Serializing Objects
