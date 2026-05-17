@@ -256,7 +256,6 @@ class BinaryNinja(Disassembler):
     @override
     def is_func_thunk(self, addr: int, func_ctxt: binaryninja.Function) -> bool:
         return func_ctxt.is_thunk
-        return func_ctxt.is_thunk
 
     @override
     def get_func_decomp(self, addr: int, func_ctxt: binaryninja.Function) -> str | None:

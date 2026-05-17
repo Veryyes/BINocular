@@ -35,10 +35,13 @@ def gzf_project_name(gzf_path: pathlib.Path) -> str | None:
         return None
 
     # Slightly Scuff. Subject to change if serialization format changes
-    with open(gzf_path, "rb") as f:
-        f.seek(0x12)
-        proj_name_len = struct.unpack(">H", f.read(2))[0]
-        return str(f.read(proj_name_len), "utf8")
+    try:
+        with open(gzf_path, "rb") as f:
+            f.seek(0x12)
+            proj_name_len = struct.unpack(">H", f.read(2))[0]
+            return str(f.read(proj_name_len), "utf8")
+    except (struct.error, UnicodeDecodeError, IOError):
+        return None
 
 
 class GhidraBase(Disassembler):

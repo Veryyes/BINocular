@@ -239,6 +239,7 @@ class Disassembler(ABC):
         """Returns whether the binary contains debug information"""
         raise NotImplementedError
 
+    @abstractmethod
     def rename_function(self, addr: int, name: str) -> None:
         """Rename the function at `addr` to `name` in the disassembler's internal state."""
         raise NotImplementedError
@@ -342,13 +343,17 @@ class Disassembler(ABC):
         if self.is_loaded:
             return
 
-        self._binary = self._load_binary()
-        self._functions = self._load_functions()
-        self._binary.functions = self._functions
-        self._binary.build_indexes()
-        self._binary._disassembler = self
-
         self.is_loaded = True
+        try:
+            self._binary = self._load_binary()
+            self._functions = self._load_functions()
+            self._binary.functions = self._functions
+            self._binary.build_indexes()
+            self._binary._disassembler = self
+        except Exception as e:
+            logger.critical(f"Failed to load binary: {e}")
+            self.is_loaded = False
+            raise
 
     def _load_binary(self) -> Binary:
         b = Binary(

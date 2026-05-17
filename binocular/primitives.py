@@ -35,7 +35,7 @@ from .source import C_Code
 from .utils import str2archinfo
 from .consts import IL, Endian, RefType, BranchType, IndirectToken
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 parsers: Dict[str, Type | None] = defaultdict(lambda: None)
