@@ -4,7 +4,7 @@ import pathlib
 import tempfile
 from urllib.request import urlopen
 
-from binocular import Ghidra
+from binocular import Ghidra, GhidraLegacy
 from binocular.ghidra_impl.core import gzf_project_name
 
 
@@ -17,9 +17,9 @@ def test_install_release_12():
 
 def test_install_release_11():
     with tempfile.TemporaryDirectory() as tmpdirname:
-        assert not Ghidra.is_installed(install_dir=tmpdirname)
-        Ghidra.install(version="11.1.1", install_dir=tmpdirname)
-        assert Ghidra.is_installed(install_dir=tmpdirname)
+        assert not GhidraLegacy.is_installed(install_dir=tmpdirname)
+        GhidraLegacy.install(version="11.1.1", install_dir=tmpdirname)
+        assert GhidraLegacy.is_installed(install_dir=tmpdirname)
 
 
 def test_install_local():
