@@ -197,6 +197,12 @@ class BinaryNinja(Disassembler):
                 return True
         return False
 
+    @override
+    def rename_function(self, addr: int, name: str) -> None:
+        func = self.bv.get_function_at(addr)
+        if func is not None:
+            func.name = name
+
     # -------------------------------------------------------
     # Function iteration
     # -------------------------------------------------------

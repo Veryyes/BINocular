@@ -8,7 +8,21 @@ import tempfile
 from pathlib import Path
 from collections import defaultdict
 from functools import cached_property
-from typing import IO, Any, Set, Dict, List, Type, Tuple, Union, Generator
+from typing import (
+    IO,
+    Any,
+    Set,
+    Dict,
+    List,
+    Type,
+    Tuple,
+    Union,
+    Generator,
+    TYPE_CHECKING,
+)
+
+if TYPE_CHECKING:
+    from .disassembler import Disassembler
 
 import pyvex
 import networkx as nx
@@ -452,9 +466,16 @@ class NativeFunction(NativeCode):
             self.names = []
         if name in self.names:
             return
+        becomes_primary = len(self.names) == 0
         self.names.append(name)
         if self._binary is not None:
             self._binary._func_names[name] = self
+            if (
+                becomes_primary
+                and self._binary._disassembler is not None
+                and self.address is not None
+            ):
+                self._binary._disassembler.rename_function(self.address, name)
 
     def remove_name(self, name: str) -> None:
         if self.names is None or name not in self.names:
@@ -465,6 +486,10 @@ class NativeFunction(NativeCode):
             self._binary._func_names.pop(name, None)
             if was_primary and self.names:
                 self._binary._func_names[self.names[0]] = self
+                if self._binary._disassembler is not None and self.address is not None:
+                    self._binary._disassembler.rename_function(
+                        self.address, self.names[0]
+                    )
 
     @property
     def calls(self) -> Generator[NativeFunction, None, None]:
@@ -679,6 +704,7 @@ class Binary(NativeCode):
     _path: Path | None = None
     _bytes: bytes | None = None
     _size: int | None = None
+    _disassembler: Disassembler | None = None
 
     functions: Set[NativeFunction] = set()
     _func_sorted: List[int] = list()

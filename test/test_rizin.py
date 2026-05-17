@@ -89,3 +89,22 @@ def test_function(make):
         f = binary.function_sym("fib")
         assert f in [x for x in f.callers]
         assert f in [x for x in f.calls]
+
+
+def test_rename_function(make):
+    with Rizin("example") as g:
+        assert g.is_installed()
+        g.analyze()
+        binary = g.binary
+        foo = binary.function_sym("foo")
+        assert foo is not None
+        addr = foo.address
+
+        foo.add_name("my_foo")
+        foo.remove_name("foo")
+
+        assert binary.function_sym("my_foo") is foo
+        assert binary.function_sym("foo") is None
+
+        funcs = g.pipe.cmdj(f"afij @ {addr}")
+        assert funcs and funcs[0]["name"].endswith("my_foo")

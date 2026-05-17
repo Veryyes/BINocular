@@ -256,6 +256,24 @@ def test_cfg(make):
         assert len(bar.cfg.nodes) > 1
         assert len(bar.cfg.edges) > 0
 
+
+def test_rename_function(make):
+    with BinaryNinja("example") as g:
+        g.analyze()
+        binary = g.binary
+        foo = binary.function_sym("foo")
+        assert foo is not None
+        addr = foo.address
+
+        foo.add_name("my_foo")
+        foo.remove_name("foo")
+
+        assert binary.function_sym("my_foo") is foo
+        assert binary.function_sym("foo") is None
+
+        bn_func = g.bv.get_function_at(addr)
+        assert bn_func.name == "my_foo"
+
         # fib is recursive with branches
         fib = binary.function_sym("fib")
         assert len(fib.cfg.nodes) > 1

@@ -282,6 +282,11 @@ class Rizin(Disassembler):
         return False
 
     @override
+    def rename_function(self, addr: int, name: str) -> None:
+        self.pipe.cmd(f"s {hex(addr)}")
+        self.pipe.cmd(f"afn {name}")
+
+    @override
     def get_func_iterator(self) -> Iterable[Dict[str, Any]]:
         """
         Returns an iterable of `Any` data type (e.g., address, interal func obj, dict of data)

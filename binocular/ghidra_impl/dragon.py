@@ -314,6 +314,19 @@ class Ghidra(GhidraBase):
         return False
 
     @typing_extensions.override
+    def rename_function(self, addr: int, name: str) -> None:
+        from ghidra.program.model.symbol import SourceType
+
+        func = self.func_manager.getFunctionAt(self._mk_addr(addr))
+        if func is None:
+            return
+        tx = self.program.startTransaction(f"rename {func.getName()} -> {name}")
+        try:
+            func.setName(name, SourceType.USER_DEFINED)
+        finally:
+            self.program.endTransaction(tx, True)
+
+    @typing_extensions.override
     def get_func_iterator(
         self,
     ) -> typing.Iterable[ghidra.program.model.listing.Function]:

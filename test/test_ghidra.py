@@ -135,6 +135,25 @@ def test_has_debug_info_false(make):
         assert g.has_debug_info() is False
 
 
+def test_rename_function(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example") as g:
+        g.analyze()
+        binary = g.binary
+        foo = binary.function_sym("foo")
+        assert foo is not None
+        addr = foo.address
+
+        foo.add_name("my_foo")
+        foo.remove_name("foo")
+
+        assert binary.function_sym("my_foo") is foo
+        assert binary.function_sym("foo") is None
+
+        ghidra_func = g.func_manager.getFunctionAt(g._mk_addr(addr))
+        assert ghidra_func.getName() == "my_foo"
+
+
 def test_script(make):
     assert Ghidra.is_installed()
     with Ghidra("example") as g:
