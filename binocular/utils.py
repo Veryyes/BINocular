@@ -9,7 +9,6 @@ from urllib.parse import unquote, urlsplit
 from archinfo import (
     ArchARM,
     ArchX86,
-    ArchAVR8,
     ArchSoot,
     ArchAMD64,
     ArchARMEL,
@@ -32,7 +31,6 @@ arches: List[Type] = [
     ArchARMCortexM,
     ArchARMEL,
     ArchARMHF,
-    ArchAVR8,
     ArchMIPS32,
     ArchMIPS64,
     ArchPPC32,
