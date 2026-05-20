@@ -183,18 +183,23 @@ class BinaryNinja(Disassembler):
 
     @override
     def is_stripped(self) -> bool:
-        bn = _import_binja()
-        # Non-auto symbols originate from the binary's symbol table; auto symbols are BN-generated names like sub_xxxxxxxx
-        for sym in self.bv.get_symbols_of_type(bn.SymbolType.FunctionSymbol):
-            if not sym.auto:
-                return False
+        # Non-allocated ELF sections (.symtab) live in parent_view, not bv.sections.
+        parent = self.bv.parent_view
+        if parent is not None and ".symtab" in parent.sections:
+            return False
+        # PE: CodeView sections are allocated and appear in bv.sections.
+        if ".debug$S" in self.bv.sections or ".debug$T" in self.bv.sections:
+            return False
         return True
 
     @override
     def has_debug_info(self) -> bool:
-        for name in self.bv.sections:
-            if name.startswith((".debug", ".zdebug", "__debug")):
-                return True
+        # Non-allocated ELF sections (.debug_*) are added to parent_view by BN's ELF
+        # loader, not to the analysis view. Check both to handle ELF and PE/MachO.
+        for view in (v for v in [self.bv, self.bv.parent_view] if v is not None):
+            for name in view.sections:
+                if name.startswith((".debug", ".zdebug", "__debug")):
+                    return True
         return False
 
     @override
