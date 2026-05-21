@@ -10,24 +10,34 @@
 
 ![Static Badge](https://img.shields.io/badge/Disassembler-Rizin-yellow)
 ![Static Badge](https://img.shields.io/badge/Disassembler-Ghidra-red)
+![Static Badge](https://img.shields.io/badge/Disassembler-BinaryNinja-blue)
 
-BINocular is an python package for static analysis of compiled binaries 
-through a common API layer. It is an abstraction layer between different
-disassemblers and provides:
+BINocular is a disassembler agnostic binary analysis framework written in python. It provides an common abstraction layer between different disassemblers.
 
+Features Include: 
 - Disassembler Agnostic Representation of Common Binary Analysis Primitives and Concepts
   * Assembly Instructions
-  * Intermediate Representations (e.g., pcode)
+  * Intermediate Representations (VEX, ESIL, PCODE, LLIL)
   * Functions
     - Compiled
     - Source
   * Control Flow Graph
 - CLI and API to install supported disassemblers
 - Serialization/Deserialization of concepts (e.g., Functions, Basic Blocks, Instructions)
-- Persistent storage of objects to SQL databases
 
 ## Disassembler Backend Support
 ### [Ghidra](https://www.ghidra-sre.org/)
+BINocular ships two Ghidra classes:
+- **`Ghidra`** — for Ghidra ≥ 12.0.0; uses `pyghidra` for direct JVM interop (faster, no subprocess)
+- **`GhidraLegacy`** — for Ghidra < 12.0.0; communicates via a socket-based RPC subprocess
+
+Both expose the same API. Import the one that matches your installed Ghidra version:
+```python
+from binocular import Ghidra       # >= 12.0.0
+from binocular import GhidraLegacy # <  12.0.0
+```
+
+### [Binary Ninja](https://binary.ninja/)
 ### [Rizin](https://rizin.re/)
 
 ## Installation
@@ -37,6 +47,21 @@ disassemblers and provides:
 **List Avaliable Ghidra Versions to Install**
 ```shell
 $ binocular install ghidra -l 
+12.0.4
+12.0.3
+12.0.2
+12.0.1
+12.0
+11.4.3
+11.4.2
+11.4.1
+11.4
+11.3.2
+11.3.1
+11.3
+11.2.1
+11.2
+11.1.2
 11.1.1
 11.1
 11.0.3
@@ -48,37 +73,28 @@ $ binocular install ghidra -l
 10.3.2
 10.3.1
 10.3
+10.2.3
+10.2.2
+10.2.1
+10.2
 ```
 
 **Install Ghidra from Command Line**
 ```shell
-$ binocular install ghidra -v 11.1 -p ~/Documents/ghidra_install_location
-2024-06-15 13:41:04 binocular.ghidra[472653] INFO Installing Ghidra 11.1 to /home/brandon/Documents/ghidra_install_location
-2024-06-15 13:41:27 binocular.ghidra[472653] INFO Extracting Ghidra
-2024-06-15 13:41:31 pyhidra.javac[472653] INFO WARNING
-2024-06-15 13:41:32 pyhidra.launcher[472653] INFO Installed plugin: pyhidra 1.1.0
+$ binocular install ghidra -v 12.0.1
+2026-03-21 01:53:04 BINocular[336690] INFO Installing Ghidra 12.0.1 to /home/brandon/Documents/DaSH/compiler_wiz/angha/BINocular/binocular/data/ghidra
+2026-03-21 01:53:04 BINocular[336690] INFO Downloading https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.1_build/ghidra_12.0.1_PUBLIC_20260114.zip...
+2026-03-21 01:53:24 BINocular[336690] INFO Extracting Ghidra
+2026-03-21 01:54:21 BINocular[336690] INFO Ghidra Install Completed
 ```
 
-**Parse a Binary and load it to a SQLite Database**
+**Install Rizin from Command Line**
 ```shell
-$ binocular parse ./test/example rizin --uri sqlite:///$(pwd)/example.db
-2024-06-15 13:46:23 binocular.disassembler[473064] INFO [Rizin] Analyzing test/example
-2024-06-15 13:46:23 binocular.disassembler[473064] INFO [Rizin] Analysis Complete: 0.03s
-2024-06-15 13:46:23 binocular.disassembler[473064] INFO [Rizin] Binary Data Loaded: 0.00s
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] 49 Basic Blocks Loaded
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] 18 Functions Loaded
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] Function Data Loaded: 2.26s
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] Ave Function Load Time: 0.13s
-2024-06-15 13:46:25 binocular.disassembler[473064] INFO [Rizin] Parsing Complete: 2.26s
-Binary:
-	Name: example
-	Arch: x86
-	Bits: 64
-	Endian: Endian.LITTLE
-	SHA256: a7f9141c1781c20d13b8442f24fcddba4b75b4b73ae04e734a92a79fcf0869c3
-	Size: 18088
-	Num Functions: 18
-Inserting to DB
+$ binocular install rizin
+2026-03-21 01:53:25 BINocular[337174] INFO Installing Rizin
+2026-03-21 01:53:25 BINocular[337174] INFO Installing Rizin v0.8.2 to /home/brandon/Documents/DaSH/compiler_wiz/angha/BINocular/binocular/data/rizin
+2026-03-21 01:53:25 BINocular[337174] INFO Downloading https://github.com/rizinorg/rizin/releases/download/v0.8.2/rizin-v0.8.2-static-x86_64.tar.xz...
+2026-03-21 01:54:33 BINocular[337174] INFO Rizin Install Completed
 ```
 
 ## Example Python Usage
@@ -96,6 +112,48 @@ if not Ghidra.is_installed(install_dir=install_dir):
     Ghidra.install(version='dee48e9', install_dir=install_dir, build=True)
 ```
 
+### Renaming a Function
+
+`rename_function()` updates the function name in the disassembler and propagates the change to the `Binary` object's lookup indexes.
+
+```python
+from binocular import Ghidra
+
+with Ghidra("./test/example") as g:
+    g.analyze()
+    g.rename_function(0x101249, "my_fib")
+    b = g.binary
+    f = b.function_sym("my_fib")  # lookup by new name works immediately
+    print(f.name)  # my_fib
+```
+
+### Exporting a Ghidra Zip File (GZF)
+
+`export_gzf()` saves the analyzed program as a `.gzf` file that can be re-imported into Ghidra without re-running analysis. Available on `Ghidra` (≥ 12.0.0) only.
+
+```python
+from binocular import Ghidra
+
+with Ghidra("./test/example") as g:
+    g.analyze()
+    out = g.export_gzf("./example.gzf")
+    print(out)  # PosixPath('example.gzf')
+```
+
+### Call Graph
+
+`binary.call_graph` returns a [NetworkX](https://networkx.org/) `DiGraph` where each node is a `NativeFunction` and edges represent calls.
+
+```python
+import networkx as nx
+from binocular import Ghidra
+
+with Ghidra("./test/example") as g:
+    g.analyze()
+    cg = g.binary.call_graph
+    print(nx.info(cg))
+```
+
 ### Serializing Objects
 All the basic primitives such as `Instruction`, `Basic Block`, and `NativeFunction` are all built on top of [Pydantic](https://docs.pydantic.dev/latest/) with python type hinting. This means we get all the benefits of pydantic like type validation and json serialization.
 
@@ -103,11 +161,11 @@ All the basic primitives such as `Instruction`, `Basic Block`, and `NativeFuncti
 ```python
 from binocular import Ghidra
 
-with Ghidra() as g:
-    g.load("./test/example")
+with Ghidra("./test/example") as g:
+    g.analyze()
     b = g.binary
     
-    f = g.function_sym("fib")
+    f = b.function_sym("fib")
     bb = list(f.basic_blocks)[0]
     print(bb.model_dump_json())
 ```
@@ -118,109 +176,172 @@ with Ghidra() as g:
   "endianness": 0,
   "architecture": "x86",
   "bitness": 64,
-  "address": 1053275,
-  "pie": 3,
+  "address": 1053246,
   "instructions": [
     {
       "endianness": 0,
       "architecture": "x86",
       "bitness": 64,
-      "address": 1053275,
-      "data": "837dec01",
-      "asm": "CMP",
+      "address": 1053246,
+      "data": "f30f1efa",
+      "asm": "ENDBR64",
       "comment": "",
       "ir": {
         "lang_name": 2,
-        "data": "(unique, 0x4400, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0xdb00, 4) LOAD (const, 0x1b1, 4) , (unique, 0x4400, 8);(unique, 0x27600, 4) COPY (unique, 0xdb00, 4);(register, 0x200, 1) INT_LESS (unique, 0x27600, 4) , (const, 0x1, 4);(register, 0x20b, 1) INT_SBORROW (unique, 0x27600, 4) , (const, 0x1, 4);(unique, 0x27700, 4) INT_SUB (unique, 0x27600, 4) , (const, 0x1, 4);(register, 0x207, 1) INT_SLESS (unique, 0x27700, 4) , (const, 0x0, 4);(register, 0x206, 1) INT_EQUAL (unique, 0x27700, 4) , (const, 0x0, 4);(unique, 0x15080, 4) INT_AND (unique, 0x27700, 4) , (const, 0xff, 4);(unique, 0x15100, 1) POPCOUNT (unique, 0x15080, 4);(unique, 0x15180, 1) INT_AND (unique, 0x15100, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x15180, 1) , (const, 0x0, 1)"
+        "data": ""
       }
     },
     {
       "endianness": 0,
       "architecture": "x86",
       "bitness": 64,
-      "address": 1053279,
+      "address": 1053250,
+      "data": "55",
+      "asm": "PUSH",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x4f900, 8) COPY (register, 0x28, 8);(register, 0x20, 8) INT_SUB (register, 0x20, 8) , (const, 0x8, 8); ---  STORE (const, 0x1b1, 8) , (register, 0x20, 8) , (unique, 0x4f900, 8)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053251,
+      "data": "4889e5",
+      "asm": "MOV",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(register, 0x28, 8) COPY (register, 0x20, 8)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053254,
+      "data": "53",
+      "asm": "PUSH",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x4f900, 8) COPY (register, 0x18, 8);(register, 0x20, 8) INT_SUB (register, 0x20, 8) , (const, 0x8, 8); ---  STORE (const, 0x1b1, 8) , (register, 0x20, 8) , (unique, 0x4f900, 8)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053255,
+      "data": "4883ec18",
+      "asm": "SUB",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(register, 0x200, 1) INT_LESS (register, 0x20, 8) , (const, 0x18, 8);(register, 0x20b, 1) INT_SBORROW (register, 0x20, 8) , (const, 0x18, 8);(register, 0x20, 8) INT_SUB (register, 0x20, 8) , (const, 0x18, 8);(register, 0x207, 1) INT_SLESS (register, 0x20, 8) , (const, 0x0, 8);(register, 0x206, 1) INT_EQUAL (register, 0x20, 8) , (const, 0x0, 8);(unique, 0x58300, 8) INT_AND (register, 0x20, 8) , (const, 0xff, 8);(unique, 0x58400, 1) POPCOUNT (unique, 0x58300, 8);(unique, 0x58500, 1) INT_AND (unique, 0x58400, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x58500, 1) , (const, 0x0, 1)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053259,
+      "data": "897dec",
+      "asm": "MOV",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x8f00, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0xd400, 4) COPY (register, 0x38, 4); ---  STORE (const, 0x1b1, 4) , (unique, 0x8f00, 8) , (unique, 0xd400, 4)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053262,
+      "data": "837dec00",
+      "asm": "CMP",
+      "comment": "",
+      "ir": {
+        "lang_name": 2,
+        "data": "(unique, 0x8f00, 8) INT_ADD (register, 0x28, 8) , (const, 0xffffffffffffffec, 8);(unique, 0x23d00, 4) LOAD (const, 0x1b1, 4) , (unique, 0x8f00, 8);(unique, 0x7d100, 4) COPY (unique, 0x23d00, 4);(register, 0x200, 1) INT_LESS (unique, 0x7d100, 4) , (const, 0x0, 4);(register, 0x20b, 1) INT_SBORROW (unique, 0x7d100, 4) , (const, 0x0, 4);(unique, 0x7d300, 4) INT_SUB (unique, 0x7d100, 4) , (const, 0x0, 4);(register, 0x207, 1) INT_SLESS (unique, 0x7d300, 4) , (const, 0x0, 4);(register, 0x206, 1) INT_EQUAL (unique, 0x7d300, 4) , (const, 0x0, 4);(unique, 0x58300, 4) INT_AND (unique, 0x7d300, 4) , (const, 0xff, 4);(unique, 0x58400, 1) POPCOUNT (unique, 0x58300, 4);(unique, 0x58500, 1) INT_AND (unique, 0x58400, 1) , (const, 0x1, 1);(register, 0x202, 1) INT_EQUAL (unique, 0x58500, 1) , (const, 0x0, 1)"
+      }
+    },
+    {
+      "endianness": 0,
+      "architecture": "x86",
+      "bitness": 64,
+      "address": 1053266,
       "data": "7507",
       "asm": "JNZ",
       "comment": "",
       "ir": {
         "lang_name": 2,
-        "data": "(unique, 0xe480, 1) BOOL_NEGATE (register, 0x206, 1); ---  CBRANCH (ram, 0x101268, 8) , (unique, 0xe480, 1)"
+        "data": "(unique, 0x24f00, 1) BOOL_NEGATE (register, 0x206, 1); ---  CBRANCH (ram, 0x10125b, 8) , (unique, 0x24f00, 1)"
       }
     }
   ],
   "branches": [
     {
-      "btype": 1,
-      "target": 1053288
+      "type": 1,
+      "target": 1053268
     },
     {
-      "btype": 1,
-      "target": 1053281
+      "type": 1,
+      "target": 1053275
     }
   ],
   "is_prologue": false,
   "is_epilogue": false,
   "xrefs": [
     {
-      "from_": 1053279,
-      "to": 1053288,
+      "from_": 1053266,
+      "to": 1053275,
       "type": 1
+    },
+    {
+      "from_": 1053447,
+      "to": 1053246,
+      "type": 2
+    },
+    {
+      "from_": 1057112,
+      "to": 1053246,
+      "type": 0
+    },
+    {
+      "from_": 0,
+      "to": 1053246,
+      "type": 0
+    },
+    {
+      "from_": 1053296,
+      "to": 1053246,
+      "type": 2
+    },
+    {
+      "from_": 1053259,
+      "to": -28,
+      "type": 4
+    },
+    {
+      "from_": 1056888,
+      "to": 1053246,
+      "type": 0
+    },
+    {
+      "from_": 1053262,
+      "to": -28,
+      "type": 3
+    },
+    {
+      "from_": 1053311,
+      "to": 1053246,
+      "type": 2
     }
   ]
 }
-```
 
-### Loading a Binary In and Upload to a Database
-Each primitive has a corresponding [SQLAlchemy](https://www.sqlalchemy.org/) ORM class that is suffixed with "ORM". (e.g. `NativeFunctionORM`, `BinaryORM`). 
-
-```python
-from sqlalchemy.orm import Session
-from binocular import Ghidra, Backend, FunctionSource
-
-Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
-
-# If no install_dir parameter is specified, it will use the baked in default path (inside the python package itself)
-with Ghidra() as g:
-    g.load("./test/example")
-    b = g.binary
-    
-    for f in b.functions:
-        name = f.names[0]
-
-        # Auto parse the source code and associate the functions within 
-        # the source to the parsed functions that Ghidra has found
-        src = FunctionSource.from_file(name, './test/example.c')
-        if src is not None:
-            f.sources.add(src)
-
-    # Load the entire binary to the database set in line 4
-    with Session(Backend.engine) as s:
-        b.db_add(s)
-        s.commit()
-
-```
-
-### Querying Data from a Database
-This is an example of querying a binary by name. This is all SQL/SQLAlchemy so make whatever queries you want.
-
-Use the `.from_orm()` function to lift the ORM object back to a Pydantic BaseModel object
-```python
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-from binocular import Backend, Binary
-from binocular.db import BinaryORM, NameORM
-
-Backend.set_engine('sqlite:////home/brandon/Documents/BINocular/example.db')
-
-with Session(Backend.engine) as session:
-    # Select a binary whoes file name has been "example"
-    binary = session.execute(
-        select(BinaryORM).join(NameORM, BinaryORM.names).where(NameORM.name == 'example')
-    ).all()
-    binary = [b[0] for b in binary][0]
-
-    # Convert the BinaryORM object to a Binary Object
-    # and get all its functions
-    funcs = Binary.from_orm(binary).functions
-    print(f"example has {len(funcs)} functions")
 ```

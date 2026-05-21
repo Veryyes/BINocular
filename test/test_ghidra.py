@@ -1,17 +1,25 @@
 import itertools
-import json
 import os
+import pathlib
 import tempfile
 from urllib.request import urlopen
 
-from binocular import Binary, Ghidra
+from binocular import Ghidra, GhidraLegacy
+from binocular.ghidra_impl.core import gzf_project_name
 
 
-def test_install_release():
+def test_install_release_12():
     with tempfile.TemporaryDirectory() as tmpdirname:
         assert not Ghidra.is_installed(install_dir=tmpdirname)
-        Ghidra.install(version="11.1.1", install_dir=tmpdirname)
+        Ghidra.install(version="12.0", install_dir=tmpdirname)
         assert Ghidra.is_installed(install_dir=tmpdirname)
+
+
+def test_install_release_11():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        assert not GhidraLegacy.is_installed(install_dir=tmpdirname)
+        GhidraLegacy.install(version="11.1.1", install_dir=tmpdirname)
+        assert GhidraLegacy.is_installed(install_dir=tmpdirname)
 
 
 def test_install_local():
@@ -46,10 +54,21 @@ def test_build_commit_2():
         assert Ghidra.is_installed(install_dir=tmpdirname)
 
 
+def test_binary_not_in_cwd(make):
+    assert Ghidra.is_installed()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        symlink = os.path.join(tmpdir, "example")
+        os.symlink(os.path.abspath("example"), symlink)
+
+        with Ghidra(symlink) as g:
+            g.analyze()
+            assert g.binary is not None
+
+
 def test_disassm(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         b = g.binary
 
         assert "example" in b.names
@@ -70,73 +89,121 @@ def test_disassm(make):
             assert f0 == f1
 
 
-def test_binary(make):
-    assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
-        b = g.binary
-
-        borm = b.orm()
-        assert b.architecture == borm.architecture
-        assert b.endianness == borm.endianness
-        assert b.bitness == borm.bitness
-        assert b.entrypoint == borm.entrypoint
-        assert b.os == borm.os
-        assert b.sha256 == borm.sha256
-
-        b1 = Binary.from_orm(borm)
-        assert b1.architecture == borm.architecture
-        assert b1.endianness == borm.endianness
-        assert b1.bitness == borm.bitness
-        assert b1.entrypoint == borm.entrypoint
-        assert b1.os == borm.os
-        assert b1.sha256 == borm.sha256
-
-        assert b1.architecture == b.architecture
-        assert b1.endianness == b.endianness
-        assert b1.bitness == b.bitness
-        assert b1.entrypoint == b.entrypoint
-        assert b1.os == b.os
-        assert b1.sha256 == b.sha256
-
-
 def test_function(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
-        f = g.function_sym("foo")
+    with Ghidra("example") as g:
+        g.analyze()
+        binary = g.binary
+        f = binary.function_sym("foo")
 
-        form = f.orm()
-        assert f.architecture == form.architecture
-        assert f.endianness == form.endianness
-        assert f.bitness == form.bitness
-        assert f.return_type == form.return_type
-        assert ", ".join([str(x) for x in f.argv]) == form.argv
-
-        f = g.function_sym("main")
+        f = binary.function_sym("main")
         # print(f.calls_addrs)
-        assert g.function_sym("foo") in [x for x in f.calls]
-        assert g.function_sym("fib") in [x for x in f.calls]
+        assert binary.function_sym("foo") in [x for x in f.calls]
+        assert binary.function_sym("fib") in [x for x in f.calls]
 
         # Recursive, so itself should be a caller and calls
-        f = g.function_sym("fib")
+        f = binary.function_sym("fib")
         assert f in [x for x in f.callers]
         assert f in [x for x in f.calls]
 
 
+def test_is_stripped(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example") as g:
+        g.analyze()
+        assert g.is_stripped() is False
+
+
+def test_is_stripped_true(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example_stripped") as g:
+        g.analyze()
+        assert g.is_stripped() is True
+
+
+def test_has_debug_info(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example") as g:
+        g.analyze()
+        assert g.has_debug_info() is True
+
+
+def test_has_debug_info_false(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example_stripped") as g:
+        g.analyze()
+        assert g.has_debug_info() is False
+
+
+def test_rename_function(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example") as g:
+        g.analyze()
+        binary = g.binary
+        foo = binary.function_sym("foo")
+        assert foo is not None
+        addr = foo.address
+
+        foo.add_name("my_foo")
+        foo.remove_name("foo")
+
+        assert binary.function_sym("my_foo") is foo
+        assert binary.function_sym("foo") is None
+
+        ghidra_func = g.func_manager.getFunctionAt(g._mk_addr(addr))
+        assert ghidra_func.getName() == "my_foo"
+
+
 def test_script(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         stdout = g.run_script("./ghidra_script.py", 10)
+
+    assert stdout is not None
     assert "Ghidra Version:" in stdout
 
 
 def test_script_args(make):
     assert Ghidra.is_installed()
-    with Ghidra() as g:
-        g.load("example")
+    with Ghidra("example") as g:
+        g.analyze()
         script_args = ["ARRRGH", "BLEHH", "BIN OCULAR", '"X"']
         stdout = g.run_script("./ghidra_script_args.py", 10, script_args=script_args)
+        assert stdout is not None
         for a in script_args:
             assert a in stdout
+
+
+def test_script_java(make):
+    assert Ghidra.is_installed()
+    with Ghidra("example") as g:
+        g.analyze()
+        stdout = g.run_script("HelloWorld.java", 10)
+    assert "Hello, World!" in stdout
+
+
+def test_export_gzf(make):
+    assert Ghidra.is_installed()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = pathlib.Path(tmpdir) / "example.gzf"
+        with Ghidra("example") as g:
+            g.analyze()
+            result = g.export_gzf(out)
+
+        assert result == out
+        assert result.exists()
+        assert result.suffix == ".gzf"
+        assert gzf_project_name(result) == "example"
+
+
+def test_export_gzf_adds_suffix(make):
+    assert Ghidra.is_installed()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = pathlib.Path(tmpdir) / "example"
+        with Ghidra("example") as g:
+            g.analyze()
+            result = g.export_gzf(out)
+
+        assert result.suffix == ".gzf"
+        assert result.exists()

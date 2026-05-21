@@ -2,16 +2,10 @@ import logging
 
 import coloredlogs  # type: ignore[import-untyped]
 
-logger = logging.getLogger("BINocular")
-coloredlogs.install(
-    logger=logger,
-    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s",
-    level=logging.DEBUG,
-)
-
 from .consts import IL, BranchType, Endian, IndirectToken
-from .disassembler import Backend, Disassembler
-from .ghidra import Ghidra
+from .disassembler import Disassembler
+from .ghidra_impl.legacy import GhidraLegacy  # Ghidra < 12.0.0
+from .ghidra_impl.dragon import Ghidra  # Ghidra >= 12.0.0
 from .primitives import (
     IR,
     Argument,
@@ -25,19 +19,28 @@ from .primitives import (
     Variable,
 )
 from .rizin import Rizin
+from .binja import BinaryNinja
+
+logger = logging.getLogger("BINocular")
+coloredlogs.install(
+    logger=logger,
+    fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s",
+    level=logging.DEBUG,
+)
 
 __all__ = [
     "Argument",
     "Branch",
     "IR",
-    "Backend",
     "Instruction",
     "BasicBlock",
     "NativeFunction",
     "SourceFunction",
     "Binary",
+    "GhidraLegacy",
     "Ghidra",
     "Rizin",
+    "BinaryNinja",
     "Disassembler",
     "Endian",
     "BranchType",

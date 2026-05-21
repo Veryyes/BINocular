@@ -1,45 +1,44 @@
 from __future__ import annotations
 
+import os
+import bisect
 import hashlib
 import logging
-import os
 import tempfile
+from pathlib import Path
 from collections import defaultdict
 from functools import cached_property
-from pathlib import Path
-from typing import IO, Any, Dict, List, Optional, Set, Type, Union, Tuple
-
-import networkx as nx
-import pyvex
-from pydantic import BaseModel, computed_field, model_validator
-from pydantic.functional_serializers import PlainSerializer
-from pydantic.functional_validators import PlainValidator
-from sqlalchemy.orm import Session
-from typing_extensions import Annotated
-
-from .consts import IL, BranchType, Endian, IndirectToken, RefType
-from .db import (
-    IR_ORM,
-    MAX_STR_SIZE,
-    BasicBlockORM,
-    BinaryORM,
-    BranchORM,
-    InstructionORM,
-    MetaInfo,
-    NameORM,
-    NativeFunctionORM,
-    ReferenceORM,
-    SourceFunctionORM,
-    StringsORM,
-    VariableORM,
+from typing import (
+    IO,
+    Any,
+    Set,
+    Dict,
+    List,
+    Type,
+    Tuple,
+    Union,
+    Generator,
+    TYPE_CHECKING,
 )
+
+if TYPE_CHECKING:
+    from .disassembler import Disassembler
+
+import pyvex
+import networkx as nx
+from typing_extensions import Annotated, Self
+from pydantic.functional_validators import PlainValidator
+from pydantic.functional_serializers import PlainSerializer
+from pydantic import BaseModel, computed_field, model_validator
+
 from .source import C_Code
 from .utils import str2archinfo
+from .consts import IL, Endian, RefType, BranchType, IndirectToken
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
-parsers: Dict[str, Optional[Type]] = defaultdict(lambda: None)
+parsers: Dict[str, Type | None] = defaultdict(lambda: None)
 parsers["C"] = C_Code
 
 
@@ -73,22 +72,11 @@ class Branch(BaseModel):
 
     type: BranchType
     """Type of Jump"""
-    target: Optional[int]
+    target: int | None
     """Address to Jump to"""
-
-    @classmethod
-    def orm_type(cls) -> Type:
-        return BranchORM
-
-    @classmethod
-    def from_orm(cls, orm):
-        return cls(type=orm.type, target=orm.target)
 
     def __hash__(self):
         return hash((self.type, self.target))
-
-    def orm(self):
-        return BranchORM(type=self.type, target=self.target)
 
 
 class IR(BaseModel):
@@ -107,30 +95,7 @@ class Variable(BaseModel):
     name: str
     is_register: bool
     is_stack: bool
-    stack_offset: Optional[int] = 0
-
-    @classmethod
-    def orm_type(cls) -> Type:
-        return VariableORM
-
-    @classmethod
-    def from_orm(cls, orm):
-        return cls(
-            data_type=orm.data_type,
-            name=orm.name,
-            is_register=orm.is_register,
-            is_stack=orm.is_stack,
-            stack_offset=orm.stack_offset,
-        )
-
-    def orm(self):
-        return VariableORM(
-            data_type=self.data_type,
-            name=self.name,
-            is_register=self.is_register,
-            is_stack=self.is_stack,
-            stack_offset=self.stack_offset,
-        )
+    stack_offset: int | None = 0
 
 
 class Reference(BaseModel):
@@ -140,31 +105,20 @@ class Reference(BaseModel):
     to: int
     type: RefType
 
-    @classmethod
-    def orm_type(cls) -> Type:
-        return ReferenceORM
-
-    @classmethod
-    def from_orm(cls, orm):
-        return cls(from_=orm.from_addr, to=orm.to_addr, type=orm.type)
-
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.from_, self.to, self.type.value))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
-
-    def orm(self):
-        return ReferenceORM(from_addr=self.from_, to_addr=self.to, type=self.type)
 
 
 class Argument(BaseModel):
     """Represents a single argument in a function"""
 
-    data_type: Optional[str] = None
+    data_type: str | None = None
     """Argument data type (e.g., char, int, short*, struct socket, long(*)(char*))"""
 
-    var_name: Optional[str] = None
+    var_name: str | None = None
     """Argument Variable Name"""
 
     var_args: bool = False
@@ -177,7 +131,7 @@ class Argument(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def from_literal(cls, data: Any) -> Any:
+    def from_literal(cls, data: Any) -> Self:
         if isinstance(data, str):
             data = data.strip()
 
@@ -196,7 +150,7 @@ class Argument(BaseModel):
             )
         return data
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.var_args:
             return "..."
 
@@ -206,9 +160,9 @@ class Argument(BaseModel):
 class NativeCode(BaseModel):
     """A Base class to represent attributes of compiled code generally"""
 
-    endianness: Optional[Endian] = None
-    architecture: Optional[str] = None
-    bitness: Optional[int] = None
+    endianness: Endian | None = None
+    architecture: str | None = None
+    bitness: int | None = None
 
     def __repr__(self) -> str:
         fields = []
@@ -232,91 +186,37 @@ class NativeCode(BaseModel):
 class Instruction(NativeCode):
     """Represents a single instruction"""
 
-    address: Optional[int] = None
+    address: int | None = None
     data: Bytes
-    asm: Optional[str] = ""
-    comment: Optional[str] = ""
-    ir: Optional[IR] = None
+    asm: str | None = ""
+    comment: str | None = ""
+    ir: IR | None = None
 
-    @classmethod
-    def orm_type(cls) -> Type:
-        return InstructionORM
-
-    @classmethod
-    def from_orm(cls, orm, ir_type: Optional[IL] = None):
-        instruction = cls(
-            endianness=orm.endianness,
-            architecture=orm.architecture,
-            bitness=orm.bitness,
-            address=orm.address,
-            data=orm.bytes,
-            asm=orm.asm,
-            comment=orm.comment,
-        )
-
-        if len(orm.ir) > 0:
-            # If multiple IRs for this instruction has been loaded
-            # into the database (i.e. we ran more than one diassembler)
-            # then orm.ir would have more than one entry
-            # We will just pick one arbitrarily unless, specified
-            if ir_type is None:
-                ir_data = orm.ir[0]
-            else:
-                for ir_data in orm.ir:
-                    if ir_data.lang == ir_type:
-                        break
-
-            ir = IR(lang_name=ir_data.lang, data=ir_data.data)
-            instruction.ir = ir
-
-        return instruction
-
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def __eq__(self, other: object):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Instruction):
             return False
 
         return self.data == other.data
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.data)
 
-    def __contains__(self, x: bytes):
+    def __contains__(self, x: bytes) -> bool:
         return x in self.data
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         return self.data
 
-    def orm(self):
-        i = InstructionORM(
-            endianness=self.endianness,
-            architecture=self.architecture,
-            bitness=self.bitness,
-            address=self.address,
-            bytes=self.data,
-            asm=self.asm,
-            comment=self.comment,
-        )
-
-        ir = None
-        if self.ir is not None:
-            ir = IR_ORM(lang=self.ir.lang_name, data=self.ir.data, instruction=i)
-            i.ir.append(ir)
-
-        return i, ir
-
-    def db_add(self, session: Session):
-        instr, ir = self.orm()
-        session.add(instr)
-        session.add(ir)
-
-    def vex(self):
+    def vex(self) -> IR:
         address = self.address
         if address is None:
             address = 0
 
+        if self.architecture is None:
+            raise ValueError("Cannot lift VEX IR: architecture is unknown")
         il = pyvex.lift(self.data, address, str2archinfo(self.architecture))
         return IR(
             lang_name=IL.VEX, data=";".join([stmt.pp_str() for stmt in il.statements])
@@ -326,38 +226,17 @@ class Instruction(NativeCode):
 class BasicBlock(NativeCode):
     """Represents a Basic Block"""
 
-    _function: Optional[NativeFunction] = None
+    _function: NativeFunction | None = None
 
-    address: Optional[int] = None
+    address: int | None = None
 
     instructions: List[Instruction] = list()
     branches: Set[Branch] = set()
-    is_prologue: Optional[bool] = False
-    is_epilogue: Optional[bool] = False
+    is_prologue: bool | None = False
+    is_epilogue: bool | None = False
     xrefs: Set[Reference] = set([])
 
-    _size_bytes: Optional[int] = None
-
-    @classmethod
-    def orm_type(cls) -> Type:
-        return BasicBlockORM
-
-    @classmethod
-    def from_orm(cls, orm):
-        bb = cls(
-            address=orm.address,
-            architecture=orm.architecture,
-            endianness=orm.endianness,
-            bitness=orm.bitness,
-            xrefs=set(Reference.from_orm(ref) for ref in orm.xrefs),
-            branches=set(Branch.from_orm(b) for b in orm.branches),
-        )
-
-        for instr_orm in orm.instructions:
-            instr = Instruction.from_orm(instr_orm)
-            bb.instructions.append(instr)
-
-        return bb
+    _size_bytes: int | None = None
 
     class BasicBlockIterator:
         def __init__(self, block: BasicBlock):
@@ -372,7 +251,7 @@ class BasicBlock(NativeCode):
             for bb in block._function.basic_blocks:
                 self.block_cache[bb.address] = bb
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         def __next__(self) -> Tuple[BranchType, Union[IndirectToken, int, BasicBlock]]:
@@ -397,18 +276,18 @@ class BasicBlock(NativeCode):
             self.idx += 1
             return btype, dest
 
-    def __iter__(self):
+    def __iter__(self) -> BasicBlock.BasicBlockIterator:
         return BasicBlock.BasicBlockIterator(self)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(bytes(self))
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self._size_bytes is None:
             self._size_bytes = sum([len(i) for i in self.instructions])
         return self._size_bytes
 
-    def __contains__(self, x: Union[Instruction, bytes, int]):
+    def __contains__(self, x: Union[Instruction, bytes, int]) -> bool:
         if isinstance(x, Instruction):
             return x in self.instructions
         elif isinstance(x, bytes):
@@ -419,10 +298,10 @@ class BasicBlock(NativeCode):
             end = self.end()
             if end is None:
                 raise RuntimeError("Unreachable Code")
-            return x >= self.address and x <= end
+            return x >= self.address and x < end
         raise TypeError
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         b = b""
         for instr in self.instructions:
             b += instr.data
@@ -435,58 +314,41 @@ class BasicBlock(NativeCode):
     def __repr__(self) -> str:
         return str(self)
 
-    def end(self) -> Optional[int]:
+    def end(self) -> int | None:
         if self.address is None:
             return None
         return self.address + len(self)
 
-    def set_function(self, func: NativeFunction):
+    def set_function(self, func: NativeFunction) -> None:
         self._function = func
 
-    def num_instructions(self):
+    def num_instructions(self) -> int:
         return len(self.instructions)
 
-    def vex(self):
+    def vex(self) -> IR | None:
         bb_ir = []
         for instr in self.instructions:
             bb_ir.append(instr.vex().data)
         return IR(lang_name=IL.VEX, data="\n".join(bb_ir))
 
-    def ir(self):
+    def ir(self) -> IR | None:
+        lang = IL.UNK
         bb_ir = []
+
+        if len(self.instructions) == 0:
+            return None
+
+        # We can assume no one is mixing IL. That would be hella weird otherwise
+        instr = self.instructions[0]
+        if instr.ir is not None:
+            lang = instr.ir.lang_name
+
         for instr in self.instructions:
             if instr.ir is None:
                 bb_ir.append(instr.vex().data)
             else:
                 bb_ir.append(instr.ir.data)
-        return IR(lang_name=instr.ir.lang_name, data="\n".join(bb_ir))
-
-    def orm(self):
-        bb = BasicBlockORM(
-            address=self.address,
-            endianness=self.endianness,
-            architecture=self.architecture,
-            bitness=self.bitness,
-            size=len(self),
-            xrefs=[xref.orm() for xref in self.xrefs],
-            branches=[branch.orm() for branch in self.branches],
-        )
-
-        for instr in self.instructions:
-            instr_orm, _ = instr.orm()
-            bb.instructions.append(instr_orm)
-            instr_orm.basic_block = bb
-
-        return bb
-
-    def db_add(self, session: Session):
-        bb = self.orm()
-        session.add(bb)
-        for instr in bb.instructions:
-            session.add(instr)
-            if instr.ir is not None:
-                for ir in instr.ir:
-                    session.add(ir)
+        return IR(lang_name=lang, data="\n".join(bb_ir))
 
 
 class NativeFunction(NativeCode):
@@ -494,13 +356,14 @@ class NativeFunction(NativeCode):
     Represents a natively compiled function
     """
 
+    _ctxt: Any = None  # Reference to backing disassebler function context object
     _block_lookup: Dict[int, BasicBlock] = dict()
-    _binary: Optional[Binary] = None
+    _binary: Binary | None = None
 
-    address: Optional[int] = None
-    canary: Optional[bool] = None
-    names: Optional[List[str]] = None
-    return_type: Optional[str] = None
+    address: int | None = None
+    canary: bool | None = None
+    names: List[str] | None = None
+    return_type: str | None = None
     argv: List[Argument] = list()
     variables: List[Variable] = list()
     stack_frame_size: int = 0
@@ -513,46 +376,14 @@ class NativeFunction(NativeCode):
     end_block_addrs: Set[int] = set([])
 
     @model_validator(mode="after")
-    def _populate_cache(self):
+    def _populate_cache(self) -> Self:
         for bb in self.basic_blocks:
-            self._block_lookup[bb.address] = bb
+            if bb.address is not None:
+                self._block_lookup[bb.address] = bb
             bb._function = self
         return self
 
-    @classmethod
-    def orm_type(cls) -> Type:
-        return NativeFunctionORM
-
-    @classmethod
-    def from_orm(cls, orm):
-        f = cls(
-            names=[n.name for n in orm.names],
-            address=orm.address,
-            architecture=orm.architecture,
-            endianness=orm.endianness,
-            bitness=orm.bitness,
-            sha256=orm.sha256,
-            stack_frame_size=orm.stack_frame_size,
-            return_type=orm.return_type,
-            thunk=orm.thunk,
-            argv=[
-                Argument.from_literal(arg)
-                for arg in orm.argv.split(",")
-                if len(orm.argv) > 0
-            ],
-        )
-        for var in orm.variables:
-            f.variables.append(Variable.from_orm(var))
-
-        for bb in orm.basic_blocks:
-            f.basic_blocks.add(BasicBlock.from_orm(bb))
-
-        for src_f in orm.sources:
-            f.sources.add(SourceFunction.from_orm(src_f))
-
-        return f
-
-    def __hash__(self):
+    def __hash__(self) -> int:
         return int(self.sha256, 16)
 
     def __eq__(self, other: object) -> bool:
@@ -564,7 +395,7 @@ class NativeFunction(NativeCode):
     def __ne__(self, other: object) -> bool:
         return hash(self) != hash(other)
 
-    def __contains__(self, x: Union[BasicBlock, Instruction, bytes]):
+    def __contains__(self, x: Union[BasicBlock, Instruction, bytes]) -> bool:
         if isinstance(x, BasicBlock):
             return x in self.basic_blocks
         elif isinstance(x, Instruction) or isinstance(x, bytes):
@@ -578,22 +409,50 @@ class NativeFunction(NativeCode):
     def __repr__(self) -> str:
         return str(self)
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         """Returns the bytes from the lowest addressed basic block to the end of the largest addressed basic block"""
         bbs = [bb for bb in self.basic_blocks]
-        bbs = sorted(bbs, key=lambda b: b.address)
+        bbs = sorted(bbs, key=lambda b: b.address if b.address is not None else 0)
 
         if self._binary is not None:
-            start = bbs[0].address - self._binary.base_addr
-            end = bbs[-1].address + len(bbs[-1]) - self._binary.base_addr
+            start_addr = bbs[0].address
+            end_addr = bbs[-1].address
+            if start_addr is None or end_addr is None:
+                return b""
+            start = start_addr - self._binary.base_addr
+            end = end_addr + len(bbs[-1]) - self._binary.base_addr
             return bytes(self._binary)[start:end]
 
-        return None
+        return b""
 
-    def start(self):
-        return self._block_lookup[self.address]
+    def start(self) -> BasicBlock:
+        if self.address is None:
+            # No function address defined — fall back to the basic block with the smallest address
+            if any(addr is None for addr in self._block_lookup):
+                raise ValueError(
+                    "No start defined: one or more basic blocks have no address"
+                )
+            if not self._block_lookup:
+                raise ValueError("No start defined: function has no basic blocks")
+            return self._block_lookup[min(self._block_lookup)]
 
-    def end(self):
+        bb = self._block_lookup.get(self.address, None)
+        if bb is not None:
+            return bb
+
+        # Edge case, but saw this with the debug info where a frame descriptor entry's PcBegin pointed
+        # two bytes into the the first basic block of a thunk function and a function was defined there,
+        # nested within the thunk. Technically by the debug info, that is where the function starts,
+        # but this breaks the assumption that the address of the first basic block is the address of the function
+        # so we just clap to the function start
+        candidates = [addr for addr in self._block_lookup if addr < self.address]
+        if not candidates:
+            raise ValueError(
+                f"No basic block found at or before function address {self.address:#x}"
+            )
+        return self._block_lookup[max(candidates)]
+
+    def end(self) -> List[BasicBlock]:
         return [self._block_lookup[e] for e in self.end_block_addrs]
 
     @property
@@ -602,25 +461,55 @@ class NativeFunction(NativeCode):
             return "N/A"
         return self.names[0]
 
+    def add_name(self, name: str) -> None:
+        if self.names is None:
+            self.names = []
+        if name in self.names:
+            return
+        becomes_primary = len(self.names) == 0
+        self.names.append(name)
+        if self._binary is not None:
+            self._binary._func_names[name] = self
+            if (
+                becomes_primary
+                and self._binary._disassembler is not None
+                and self.address is not None
+            ):
+                self._binary._disassembler.rename_function(self.address, name)
+
+    def remove_name(self, name: str) -> None:
+        if self.names is None or name not in self.names:
+            return
+        was_primary = self.names[0] == name
+        self.names.remove(name)
+        if self._binary is not None:
+            self._binary._func_names.pop(name, None)
+            if was_primary and self.names:
+                self._binary._func_names[self.names[0]] = self
+                if self._binary._disassembler is not None and self.address is not None:
+                    self._binary._disassembler.rename_function(
+                        self.address, self.names[0]
+                    )
+
     @property
-    def calls(self):
+    def calls(self) -> Generator[NativeFunction, None, None]:
         """Functions that this Function Calls"""
         if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
 
         for addr in self.calls_addrs:
-            f = self._binary._function_lookup.get(addr, None)
+            f = self._binary._func_addrs.get(addr, None)
             if f is not None:
                 yield f
 
     @property
-    def callers(self):
+    def callers(self) -> Generator[NativeFunction, None, None]:
         """Functions that call this Function"""
         if self._binary is None:
             raise NoContextException("Function is not associated with Binary")
 
         for addr in self.called_by:
-            f = self._binary._function_lookup.get(addr, None)
+            f = self._binary._func_addrs.get(addr, None)
             if f is not None:
                 yield f
 
@@ -697,115 +586,13 @@ class NativeFunction(NativeCode):
 
         ir = []
         for bb in bbs:
-            ir.append(bb.ir().data)
+            ir_obj = bb.ir()
+
+            # ir_obj would only be None if the basic block had no instructions
+            if ir_obj is not None:
+                ir.append(ir_obj.data)
 
         return "\n".join(ir)
-
-    def orm(self):
-        names = self.names
-        if names is None:
-            names = list()
-
-        func = NativeFunctionORM(
-            names=[NameORM(name=n) for n in names],
-            endianness=self.endianness,
-            architecture=self.architecture,
-            bitness=self.bitness,
-            address=self.address,
-            sha256=self.sha256,
-            return_type=self.return_type,
-            thunk=self.thunk,
-            argv=", ".join(str(arg) for arg in self.argv),
-        )
-
-        return func
-
-    def db_add(self, session: Session, binary: BinaryORM):
-        f_orm = None
-        with session.no_autoflush:
-            if NativeFunctionORM.exists_in_binary(session, binary.sha256, self.sha256):
-                f_orm = NativeFunctionORM.select_hash_by_binary(
-                    session, binary.sha256, self.sha256
-                )
-            else:
-                f_orm = self.orm()
-                f_orm.binary = binary
-                session.add(f_orm)
-
-            if not self.thunk:
-                sources: List[SourceFunction] = list()
-                for src in self.sources:
-                    for src_other in sources:
-                        if src.sha256 == src_other.sha256:
-                            if src.decompiled and not src_other.decompiled:
-                                src_other.perfect_decomp = True
-                                sources.append(src_other)
-                            elif not src.decompiled and src_other.decompiled:
-                                src.perfect_decomp = True
-                                sources.append(src)
-
-                for src in sources:
-                    if src is None:
-                        continue
-
-                    if not SourceFunctionORM.exists_hash(session, src.sha256):
-                        src_orm = src.orm()
-                        src_orm.compiled.append(f_orm)
-                        session.add(src_orm)
-                    else:
-                        src_orm = SourceFunctionORM.select_hash(session, src.sha256)
-                        src_orm.compiled.append(f_orm)
-
-            for called in self.calls:
-                if called == self:
-                    c = f_orm
-                elif NativeFunctionORM.exists_in_binary(
-                    session, binary.sha256, called.sha256
-                ):
-                    c = NativeFunctionORM.select_hash_by_binary(
-                        session, binary.sha256, called.sha256
-                    )
-                else:
-                    c = called.orm()
-                    c.binary = binary
-                    session.add(c)
-
-                f_orm.calls.append(c)
-
-            for caller in self.callers:
-                if caller == self:
-                    c = f_orm
-                elif NativeFunctionORM.exists_in_binary(
-                    session, binary.sha256, caller.sha256
-                ):
-                    c = NativeFunctionORM.select_hash_by_binary(
-                        session, binary.sha256, caller.sha256
-                    )
-                else:
-                    c = caller.orm()
-                    c.binary = binary
-                    session.add(c)
-
-                f_orm.callers.append(c)
-
-        assert f_orm is not None
-
-        for bb in self.basic_blocks:
-            block_orm = bb.orm()
-            f_orm.basic_blocks.append(block_orm)
-            block_orm.function = f_orm
-
-            for instr in block_orm.instructions:
-                if instr is not None:
-                    for ir in instr.ir:
-                        session.add(ir)
-                session.add(instr)
-            session.add(block_orm)
-
-        for var in self.variables:
-            var_orm = var.orm()
-            f_orm.variables.append(var_orm)
-            session.add(var_orm)
 
 
 class SourceFunction(BaseModel):
@@ -819,35 +606,14 @@ class SourceFunction(BaseModel):
     lang: str = "C"
     name: str
     decompiled: bool
-    perfect_decomp: Optional[bool] = False
+    perfect_decomp: bool | None = False
     """True if the decompilation is exactly the true source code"""
 
     source: str
-    argv: Optional[List[Argument]] = list()
-    return_type: Optional[str] = ""
+    argv: List[Argument] | None = list()
+    return_type: str | None = ""
     qualifiers: Set[str] = set()
     """Function Qualifiers such as `const`, `volatile`, or `static`"""
-
-    @classmethod
-    def orm_type(cls) -> Type:
-        return SourceFunctionORM
-
-    @classmethod
-    def from_orm(cls, orm):
-        return cls(
-            lang=orm.lang,
-            decompiled=orm.decompiled,
-            perfect_decomp=orm.perfect_decomp,
-            source=orm.source,
-            name=orm.name,
-            return_type=orm.return_type,
-            argv=[
-                Argument.from_literal(arg)
-                for arg in orm.argv.split(",")
-                if len(orm.argv) > 0
-            ],
-            qualifiers=set(orm.qualifiers.split(" ")),
-        )
 
     @classmethod
     def from_file(
@@ -857,7 +623,7 @@ class SourceFunction(BaseModel):
         encoding: str = "utf8",
         lang: str = "C",
         is_decompiled=False,
-    ):
+    ) -> Self | None:
         """
         Parse a function from the given file and create a SourceFunction object
         :param fname: the function name
@@ -884,7 +650,7 @@ class SourceFunction(BaseModel):
         encoding: str = "utf8",
         lang: str = "C",
         is_decompiled=False,
-    ):
+    ) -> Self | None:
         """
         Parse a function from the source code and create a SourceFunction object
         :param fname: the function name
@@ -917,20 +683,7 @@ class SourceFunction(BaseModel):
         function_source._tree_sitter_root = f_root
         return function_source
 
-    def orm(self):
-        return SourceFunctionORM(
-            name=self.name,
-            sha256=self.sha256,
-            lang=self.lang,
-            decompiled=self.decompiled,
-            perfect_decomp=self.perfect_decomp,
-            source=self.source,
-            return_type=self.return_type,
-            argv=", ".join(str(arg) for arg in self.argv),
-            qualifiers=" ".join(self.qualifiers),
-        )
-
-    def __hash__(self):
+    def __hash__(self) -> int:
         return int(self.sha256, 16)
 
     @computed_field(repr=False)  # type: ignore[misc]
@@ -948,89 +701,38 @@ class Binary(NativeCode):
     class NoDataException(Exception):
         pass
 
-    # Path to where the binary is stored
-    _path: Optional[Path] = None
-    # Whether or not the binary at self._path is gz compressed
-    _compressed: bool = False
-    # The file contents of the binary
-    _bytes: Optional[bytes] = None
-    _size: Optional[int] = None
-    _function_lookup: Dict[int, NativeFunction] = dict()
+    _path: Path | None = None
+    _bytes: bytes | None = None
+    _size: int | None = None
+    _disassembler: Disassembler | None = None
 
     functions: Set[NativeFunction] = set()
+    _func_sorted: List[int] = list()
+    _func_names: Dict[str, NativeFunction] = dict()
+    _func_addrs: Dict[int, NativeFunction] = dict()
+    _bbs: Dict[int, BasicBlock] = dict()
+    _bbs_sorted: List[int] = list()
+    _instrs: Dict[int, Instruction] = dict()
 
-    filename: Optional[Union[str, List[str]]] = None
+    filename: str | List[str] | None = None
 
     names: List[str] = []
     """names this binary has gone by (multiple are possbile when loading data from a database)"""
 
-    entrypoint: Optional[int] = None
-    os: Optional[str] = None
+    entrypoint: int | None = None
+    os: str | None = None
     base_addr: int = 0
     dynamic_libs: Set[str] = set([])
-    compiler: Optional[str] = None
-    compilation_flags: Optional[str] = None
+    compiler: str | None = None
+    compilation_flags: str | None = None
+    is_stripped: bool | None = None
+    has_debug_info: bool | None = None
 
     # Strings from String table if they exists, otherwise strings detected in the binary (like unix `strings`` command)
     strings: Set[str] = set([])
 
-    # User defined tags
-    tags: Set[str] = set([])
-
-    @model_validator(mode="after")
-    def _populate_cache(self):
-        for f in self.functions:
-            self._function_lookup[f.address] = f
-            f._binary = self
-        return self
-
-    @classmethod
-    def orm_type(cls) -> Type:
-        return BinaryORM
-
-    @classmethod
-    def from_path(cls, path: Union[Path, str], **kwargs):
-        obj = cls(**kwargs)
-        obj._path = Path(path)
-        return obj
-
-    @classmethod
-    def from_bytes(cls, b: bytes, **kwargs):
-        obj = cls(**kwargs)
-        obj._bytes = b
-        return obj
-
-    @classmethod
-    def from_orm(cls, orm):
-        b = cls(
-            filename=os.path.basename(orm.metainfo.path),
-            architecture=orm.architecture,
-            endianness=orm.endianness,
-            bitness=orm.bitness,
-            entrypoint=orm.entrypoint,
-            names=[n.name for n in orm.names],
-            strings=set([s.value for s in orm.strings]),
-            compiler=orm.compiler,
-            compilation_flags=orm.compilation_flags,
-            dynamic_libs=orm.dynamic_libs.split(","),
-            os=orm.os,
-            base_addr=orm.base_addr,
-            sha256=orm.sha256,
-            tags=orm.tags.split(","),
-        )
-        b.set_path(orm.metainfo.path)
-
-        if b.functions is None:
-            b.functions = set()
-
-        for f in orm.functions:
-            func = NativeFunction.from_orm(f)
-            b.functions.add(func)
-            b._function_lookup[f.address] = f
-
-        return b
-
-    def __len__(self):
+    def __len__(self) -> int:
+        """returns the size of the binary in bytes"""
         if self._size is None:
             if self._path is not None:
                 self._size = os.path.getsize(self._path)
@@ -1039,18 +741,21 @@ class Binary(NativeCode):
 
         return self._size
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return int(self.sha256, 16)
 
-    def __contains__(self, x: Union[NativeFunction, BasicBlock, Instruction, bytes]):
+    def __contains__(
+        self, x: Union[NativeFunction, BasicBlock, Instruction, bytes]
+    ) -> bool:
         if isinstance(x, NativeFunction):
             return x in self.functions
         elif isinstance(x, BasicBlock) or isinstance(x, Instruction):
             return any([x in f for f in self.functions])
         elif isinstance(x, bytes):
             return x in bytes(self)
+        return False
 
-    def __bytes__(self):
+    def __bytes__(self) -> bytes:
         """return the raw bytes of the binary"""
         if self._bytes is not None:
             return self._bytes
@@ -1062,39 +767,10 @@ class Binary(NativeCode):
 
         raise Binary.NoDataException("Binary Object has no Path or data")
 
-    def orm(self):
-        name = NameORM(name=self.filename)
-        strings = [StringsORM(value=s[:MAX_STR_SIZE]) for s in self.strings]
+    def model_post_init(self, context: Any, /) -> None:
+        self.build_indexes()
 
-        metainfo = MetaInfo(path=str(self._path), compressed=False)
-
-        b = BinaryORM(
-            metainfo=metainfo,
-            names=[name] + [NameORM(name=n) for n in self.names],
-            strings=strings,
-            endianness=self.endianness,
-            architecture=self.architecture,
-            bitness=self.bitness,
-            entrypoint=self.entrypoint,
-            base_addr=self.base_addr,
-            os=self.os,
-            compiler=self.compiler,
-            compilation_flags=self.compilation_flags,
-            dynamic_libs=",".join(list(self.dynamic_libs)),
-            sha256=self.sha256,
-            tags=",".join(self.tags),
-        )
-
-        return b
-
-    def db_add(self, session: Session):
-        b = self.orm()
-        session.add(b)
-        for f in self.functions:
-            f.db_add(session, binary=b)
-            session.commit()
-
-    def set_path(self, path: Union[Path, str]):
+    def set_path(self, path: Union[Path, str]) -> None:
         if isinstance(path, str):
             path = Path(path)
         self._path = path
@@ -1131,3 +807,84 @@ class Binary(NativeCode):
             return tp
 
         raise Binary.NoDataException("Binary Object has no Path or data")
+
+    def function_at(self, address: int) -> NativeFunction | None:
+        """Returns a Function at the address specified"""
+        return self._func_addrs.get(address, None)
+
+    def function_sym(self, symbol: str) -> NativeFunction | None:
+        """Returns a Function with the given symbol names"""
+        return self._func_names.get(symbol, None)
+
+    def basic_block(self, address: int) -> BasicBlock | None:
+        """Returns a basic block at the given address"""
+        return self._bbs.get(address, None)
+
+    def instruction(self, address: int) -> Instruction | None:
+        """Returns the instruction at the given address"""
+        return self._instrs.get(address, None)
+
+    def function_containing(self, address: int) -> NativeFunction | None:
+        """Return the function which contains the given address"""
+        idx = bisect.bisect_left(self._func_sorted, address)
+        if idx >= len(self._func_sorted):
+            return self._func_addrs[self._func_sorted[-1]]
+        if self._func_sorted[idx] == address:
+            return self._func_addrs[self._func_sorted[idx]]
+
+        idx -= 1
+        if idx < 0:
+            return None
+
+        return self._func_addrs[self._func_sorted[idx]]
+
+    def bb_containing(self, address: int) -> BasicBlock | None:
+        """Return the basicblock containing the given address"""
+        idx = bisect.bisect_left(self._bbs_sorted, address)
+
+        if idx >= len(self._bbs_sorted):
+            bb = self._bbs[self._bbs_sorted[-1]]
+        elif self._bbs_sorted[idx] == address:
+            bb = self._bbs[self._bbs_sorted[idx]]
+        else:
+            idx -= 1
+            if idx < 0:
+                return None
+
+            bb = self._bbs[self._bbs_sorted[idx]]
+
+        if address in bb:
+            return bb
+
+        return None
+
+    def build_indexes(self) -> None:
+        self._func_sorted.clear()
+        self._func_names.clear()
+        self._func_addrs.clear()
+        self._bbs.clear()
+        self._bbs_sorted.clear()
+        self._instrs.clear()
+
+        for f in self.functions:
+            f._binary = self
+
+            # Generally functions will have a default name and address,
+            # but our model has the flexibility for these two be None if you wish to manipulate these outside the context of a program
+            if f.names is not None and len(f.names) > 0:
+                self._func_names[f.names[0]] = f
+            if f.address is not None:
+                self._func_addrs[f.address] = f
+
+            for bb in f.basic_blocks:
+                if bb.address is not None:
+                    self._bbs[bb.address] = bb
+                    self._bbs_sorted.append(bb.address)
+
+                for instr in bb.instructions:
+                    if instr.address is not None:
+                        self._instrs[instr.address] = instr
+
+        self._func_sorted = list(self._func_addrs)
+        self._func_sorted.sort()
+        self._bbs_sorted.sort()

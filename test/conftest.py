@@ -10,3 +10,4 @@ def make():
     p.communicate(timeout=2)
 
     assert os.path.exists("example")
+    assert os.path.exists("example_stripped")

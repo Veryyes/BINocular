@@ -1,8 +1,8 @@
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import tree_sitter
 import tree_sitter_c
-from tree_sitter import Language, Parser
+from tree_sitter import Parser, Language
 
 
 def walk(root: tree_sitter.Node):
@@ -74,7 +74,7 @@ class C_Code:
     @classmethod
     def find_func(
         cls, function_name: str, source_code: bytes, encoding: str = "utf8"
-    ) -> Optional[tree_sitter.Node]:
+    ) -> tree_sitter.Node | None:
         """Searches for the function definition node in tree sitter by function name"""
         parser = Parser(cls.lang)
         tree = parser.parse(source_code)
@@ -92,7 +92,6 @@ class C_Code:
 
     @staticmethod
     def get_name(func_def, encoding: str = "utf8"):
-
         next_n = get_child_by_type(func_def, "pointer_declarator")
         if next_n is None:
             next_n = func_def
@@ -211,7 +210,8 @@ class C_Code:
             else:
                 data_type = (
                     str(
-                        data_type_node.text, encoding=encoding  # data_type_node is none
+                        data_type_node.text,
+                        encoding=encoding,  # data_type_node is none
                     )
                     + "*" * ptr_count
                 )
@@ -240,7 +240,7 @@ class C_Code:
                 )
                 arguments.append(
                     dict(
-                        data_type=f"{data_type}({'*'*param_ptr_count}){fptr_params}",
+                        data_type=f"{data_type}({'*' * param_ptr_count}){fptr_params}",
                         var_name=param_name,
                         is_func_ptr=True,
                     )
@@ -282,7 +282,7 @@ class C_Code:
                 next_n, _ = unwind_ptr(next_n)
 
             fptr_ret_node = traverse(next_n, "function_declarator", "parameter_list")
-            ret = f"{str(ret_node.text, encoding=encoding)}{'*'*fptr_ret_count}({'*'*ret_ptr_count}){str(fptr_ret_node.text, encoding=encoding)}"
+            ret = f"{str(ret_node.text, encoding=encoding)}{'*' * fptr_ret_count}({'*' * ret_ptr_count}){str(fptr_ret_node.text, encoding=encoding)}"
         else:
             ret_node = get_child_by_type(
                 func_def,
@@ -301,6 +301,6 @@ class C_Code:
                 encoding=encoding,
             ),
             argv=arguments,
-            return_type=f"{ret}{'*'*(0 if fptr_ret else ret_ptr_count)}",
+            return_type=f"{ret}{'*' * (0 if fptr_ret else ret_ptr_count)}",
             qualifiers=qualifiers,
         )

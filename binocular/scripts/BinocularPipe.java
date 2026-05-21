@@ -34,7 +34,6 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.lang.LanguageDescription;
 import ghidra.program.model.lang.Endian;
-import ghidra.program.util.DefinedDataIterator;
 import ghidra.program.model.symbol.ExternalManager;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
@@ -573,8 +572,10 @@ public class BinocularPipe extends GhidraScript{
 
     public List<String> getStrings(){
         LinkedList<String> list = new LinkedList<>();
-        for(Data d: DefinedDataIterator.definedStrings(currentProgram)){
-            list.add(d.getValue().toString());
+        for(Data d: listing.getDefinedData(true)){
+            if (d.hasStringValue()){
+                list.add(d.getValue().toString());
+            }
         }
         return list;
     }

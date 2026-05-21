@@ -21,9 +21,11 @@ class BranchType(Enum):
 class IL(Enum):
     """Enumeration of supported Intermediate Languages"""
 
-    VEX = 0
-    ESIL = 1
-    PCODE = 2
+    UNK = 0
+    VEX = 1
+    ESIL = 2
+    PCODE = 3
+    LLIL = 4  # BinaryNinja implementation returns low level IL
 
 
 class RefType(Enum):
