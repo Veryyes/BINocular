@@ -4,6 +4,14 @@ binocular package
 Submodules
 ----------
 
+binocular.binja
+----------------------
+
+.. automodule:: binocular.binja
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 binocular.consts
 -----------------------
 
@@ -12,26 +20,11 @@ binocular.consts
    :undoc-members:
    :show-inheritance:
 
-binocular.db
--------------------
-
-.. automodule:: binocular.db
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 binocular.disassembler
 -----------------------------
 
 .. automodule:: binocular.disassembler
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-binocular.ghidra
------------------------
-
-.. automodule:: binocular.ghidra
    :members:
    :undoc-members:
    :show-inheritance:
@@ -72,6 +65,41 @@ binocular.utils
 ----------------------
 
 .. automodule:: binocular.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Subpackages
+-----------
+
+binocular.ghidra\_impl
+-----------------------
+
+.. automodule:: binocular.ghidra_impl
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+binocular.ghidra\_impl.core
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: binocular.ghidra_impl.core
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+binocular.ghidra\_impl.dragon
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: binocular.ghidra_impl.dragon
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+binocular.ghidra\_impl.legacy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: binocular.ghidra_impl.legacy
    :members:
    :undoc-members:
    :show-inheritance:
