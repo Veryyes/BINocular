@@ -198,9 +198,8 @@ class TestRTTIRizin:
     def _skip_if_missing(self):
         from binocular import Rizin
 
-        with Rizin("rtti_simple") as g:
-            if not g.is_installed():
-                pytest.skip("Rizin not installed")
+        if not Rizin.is_installed():
+            pytest.skip("Rizin not installed")
 
     def test_simple(self, make_cpp):
         from binocular import Rizin

@@ -17,6 +17,7 @@ def make():
 def make_cpp():
     p = subprocess.Popen(["make", "cpp_rtti"])
     p.communicate(timeout=60)
+    assert p.returncode == 0, "make cpp_rtti failed"
 
     for name in ("rtti_simple", "rtti_inherit", "rtti_diamond"):
         assert os.path.exists(name), f"C++ test binary '{name}' was not built"

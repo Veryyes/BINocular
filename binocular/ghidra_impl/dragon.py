@@ -34,6 +34,7 @@ from ..primitives import (
     Variable,
     VTableEntry,
 )
+from ..rtti_util import itanium_name as _itanium_name
 
 logger = logging.getLogger("BINocular")
 
@@ -729,34 +730,7 @@ class Ghidra(GhidraBase):
         except Exception:
             pass
         if mangled.startswith("_ZTV"):
-            return self._rtti_itanium_name(mangled[4:])
-        return None
-
-    def _rtti_itanium_name(self, suffix: str) -> str | None:
-        """Manually decode an Itanium ABI class name from the post-_ZTV suffix."""
-        if not suffix:
-            return None
-        if suffix[0] == "N":
-            parts, i = [], 1
-            while i < len(suffix) and suffix[i] != "E":
-                if not suffix[i].isdigit():
-                    i += 1
-                    continue
-                j = i
-                while j < len(suffix) and suffix[j].isdigit():
-                    j += 1
-                n = int(suffix[i:j])
-                if j + n > len(suffix):
-                    break
-                parts.append(suffix[j : j + n])
-                i = j + n
-            return "::".join(parts) if parts else None
-        elif suffix[0].isdigit():
-            i = 0
-            while i < len(suffix) and suffix[i].isdigit():
-                i += 1
-            n = int(suffix[:i])
-            return suffix[i : i + n] if i + n <= len(suffix) else None
+            return _itanium_name(mangled[4:])
         return None
 
     def _rtti_read_vtable(self, vtable_addr, ptr_size: int, is_gcc: bool) -> list:
@@ -771,12 +745,20 @@ class Ghidra(GhidraBase):
             else:
                 start_slot = 2  # default: skip offset-to-top + typeinfo ptr
 
+        # Use Ghidra's data-type length as a hard slot cap to avoid over-reading
+        # into the VTT (Virtual Table Table) that follows in multiple-inheritance layouts.
+        try:
+            data = self.program.getListing().getDataAt(vtable_addr)
+            max_slots = (data.getLength() // ptr_size) if data else 512
+        except Exception:
+            max_slots = 512
+
         entries: list = []
         slot = 0
         addr = vtable_addr.add(start_slot * ptr_size)
         consecutive_bad = 0
 
-        while consecutive_bad < 3:
+        while consecutive_bad < 3 and slot < max_slots:
             val = self._rtti_read_ptr(addr, ptr_size)
             if val is None:
                 break
@@ -855,7 +837,7 @@ class Ghidra(GhidraBase):
         except Exception:
             return [], False, False
 
-        if base_count == 0 or base_count > 64 or flags > 7:
+        if base_count == 0 or base_count > 64 or flags > 3:
             return [], False, False
 
         has_virtual = False

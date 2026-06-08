@@ -506,33 +506,9 @@ class BinaryNinja(Disassembler):
         except Exception:
             pass
         if is_gcc and mangled.startswith("_ZTV"):
-            return self._bn_itanium_name(mangled[4:])
-        return None
+            from .rtti_util import itanium_name
 
-    def _bn_itanium_name(self, suffix: str) -> str | None:
-        if not suffix:
-            return None
-        if suffix[0] == "N":
-            parts, i = [], 1
-            while i < len(suffix) and suffix[i] != "E":
-                if not suffix[i].isdigit():
-                    i += 1
-                    continue
-                j = i
-                while j < len(suffix) and suffix[j].isdigit():
-                    j += 1
-                n = int(suffix[i:j])
-                if j + n > len(suffix):
-                    break
-                parts.append(suffix[j : j + n])
-                i = j + n
-            return "::".join(parts) if parts else None
-        elif suffix[0].isdigit():
-            i = 0
-            while i < len(suffix) and suffix[i].isdigit():
-                i += 1
-            n = int(suffix[:i])
-            return suffix[i : i + n] if i + n <= len(suffix) else None
+            return itanium_name(mangled[4:])
         return None
 
     def _bn_read_vtable(
@@ -552,12 +528,21 @@ class BinaryNinja(Disassembler):
             else:
                 start_slot = 2
 
+        # Cap slots using BN's data-variable width to avoid over-reading into the VTT.
+        try:
+            dv = self.bv.get_data_var_at(vtable_addr)
+            max_slots = (
+                (dv.type.width // ptr_size) if dv and dv.type and dv.type.width else 512
+            )
+        except Exception:
+            max_slots = 512
+
         entries: list = []
         slot = 0
         addr = vtable_addr + start_slot * ptr_size
         consecutive_bad = 0
 
-        while consecutive_bad < 3:
+        while consecutive_bad < 3 and slot < max_slots:
             val = self._bn_read_ptr(addr, ptr_size, is_big_endian)
             if val is None:
                 break
