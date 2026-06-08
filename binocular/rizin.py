@@ -488,6 +488,245 @@ class Rizin(Disassembler):
 
         return instrs
 
+    @override
+    def get_classes(self) -> Iterable[Any]:
+        import struct
+        from .primitives import ClassInfo, VTableEntry
+
+        ptr_size = max(self.get_bitness() // 8, 1)
+        is_le = self.get_endianness() != Endian.BIG
+        ptr_fmt = ("<" if is_le else ">") + ("Q" if ptr_size == 8 else "I")
+        u32_fmt = ("<" if is_le else ">") + "I"
+        u64_fmt = "<Q" if is_le else ">Q"
+
+        def read_chunk(addr: int, size: int) -> bytes | None:
+            try:
+                raw = self.pipe.cmdj(f"pxj {size} @ {addr}")
+                if not raw or len(raw) < size:
+                    return None
+                return bytes(raw[:size])
+            except Exception:
+                return None
+
+        def read_ptr(addr: int) -> int | None:
+            data = read_chunk(addr, ptr_size)
+            return struct.unpack(ptr_fmt, data)[0] if data else None
+
+        def read_u32(addr: int) -> int | None:
+            data = read_chunk(addr, 4)
+            return struct.unpack(u32_fmt, data)[0] if data else None
+
+        def read_u64(addr: int) -> int | None:
+            data = read_chunk(addr, 8)
+            return struct.unpack(u64_fmt, data)[0] if data else None
+
+        # Collect all symbols from the symbol table.
+        try:
+            sym_list = self.pipe.cmdj("isj") or []
+        except Exception:
+            return
+
+        syms_by_name: Dict[str, int] = {}  # realname -> vaddr
+        syms_by_addr: Dict[int, str] = {}  # vaddr    -> realname
+        sym_sizes: Dict[str, int] = {}  # realname -> byte size
+
+        for s in sym_list:
+            rn = s.get("realname") or ""
+            va = s.get("vaddr", 0)
+            sz = s.get("size", 0)
+            if rn and va:
+                syms_by_name[rn] = va
+                syms_by_addr[va] = rn
+            if rn and sz:
+                sym_sizes[rn] = sz
+
+        # Build executable address ranges from section info.
+        exec_ranges: List[Tuple[int, int]] = []
+        try:
+            for sec in self.pipe.cmdj("iSj") or []:
+                perm = sec.get("perm") or ""
+                if "x" in perm:
+                    lo = sec.get("vaddr", 0)
+                    hi = lo + sec.get("vsize", sec.get("size", 0))
+                    if lo and hi > lo:
+                        exec_ranges.append((lo, hi))
+        except Exception:
+            pass
+
+        def addr_is_exec(addr: int) -> bool:
+            return bool(addr) and any(lo <= addr < hi for lo, hi in exec_ranges)
+
+        def itanium_name(suffix: str) -> str | None:
+            """Manually decode an Itanium ABI class name from the post-_ZTI/_ZTV suffix."""
+            if not suffix:
+                return None
+            if suffix[0] == "N":
+                parts, i = [], 1
+                while i < len(suffix) and suffix[i] != "E":
+                    if not suffix[i].isdigit():
+                        i += 1
+                        continue
+                    j = i
+                    while j < len(suffix) and suffix[j].isdigit():
+                        j += 1
+                    try:
+                        n = int(suffix[i:j])
+                    except ValueError:
+                        break
+                    if j + n > len(suffix):
+                        break
+                    parts.append(suffix[j : j + n])
+                    i = j + n
+                return "::".join(parts) if parts else None
+            if suffix[0].isdigit():
+                i = 0
+                while i < len(suffix) and suffix[i].isdigit():
+                    i += 1
+                try:
+                    n = int(suffix[:i])
+                    return suffix[i : i + n] if i + n <= len(suffix) else None
+                except ValueError:
+                    return None
+            return None
+
+        def resolve_zti(ptr_val: int) -> str | None:
+            sname = syms_by_addr.get(ptr_val, "")
+            if sname.startswith("_ZTI"):
+                return itanium_name(sname[4:])
+            return None
+
+        def read_vtable(vtable_addr: int, vtable_size: int) -> list:
+            """
+            Read vtable function slots using the known byte size of the vtable symbol.
+
+            In a PIE ELF, Rizin reads raw file bytes for .data.rel.ro:
+              - R_X86_64_RELATIVE slots store the addend (= function vaddr at base 0) → exec
+              - R_X86_64_64 for __cxa_pure_virtual → non-exec, non-zero fake address
+              - Abstract-class dtor slots with no relocation → 0 (skip silently)
+
+            Classification after skipping the header (offset-to-top + typeinfo ptr):
+              - addr is exec            → regular virtual function
+              - addr is 0               → unresolved slot (abstract dtor), skip
+              - addr is non-zero non-exec → pure virtual marker (func_addr=None)
+            """
+            total_slots = vtable_size // ptr_size
+            # Detect where function pointers start (first exec slot in first 4 header slots).
+            start_slot = 2  # default: skip offset-to-top + typeinfo
+            for i in range(min(4, total_slots)):
+                val = read_ptr(vtable_addr + i * ptr_size)
+                if val and addr_is_exec(val):
+                    start_slot = i
+                    break
+
+            entries: list = []
+            for slot in range(total_slots - start_slot):
+                val = read_ptr(vtable_addr + (start_slot + slot) * ptr_size)
+                if val is None:
+                    break
+                if val == 0:
+                    continue  # abstract-class dtor slot with no RELA in file
+                if addr_is_exec(val):
+                    entries.append(
+                        VTableEntry(
+                            slot=slot,
+                            byte_offset=(start_slot + slot) * ptr_size,
+                            func_addr=val,
+                        )
+                    )
+                else:
+                    # Non-zero, non-exec: Rizin resolved an external symbol reference
+                    # (e.g. __cxa_pure_virtual via R_X86_64_64) to a fake address.
+                    entries.append(
+                        VTableEntry(
+                            slot=slot,
+                            byte_offset=(start_slot + slot) * ptr_size,
+                            func_addr=None,
+                        )
+                    )
+            return entries
+
+        def parse_gcc_rtti(zti_name: str) -> tuple:
+            """
+            Structural RTTI parsing identical to the Ghidra backend's approach.
+
+            Uses symbol size to distinguish typeinfo subtypes without chasing the
+            vptr (which points to external libstdc++ symbols with fake addresses):
+              - size == 2*ptr_size → __class_type_info:    no bases
+              - size == 3*ptr_size → __si_class_type_info: 1 base at slot 2
+              - size  > 3*ptr_size → __vmi_class_type_info: flags+count at slot 2
+            """
+            zti_addr = syms_by_name.get(zti_name, 0)
+            if not zti_addr:
+                return [], False, False
+
+            zti_size = sym_sizes.get(zti_name, 0)
+
+            if zti_size <= 2 * ptr_size:
+                return [], False, False  # __class_type_info: no bases
+
+            slot2_addr = zti_addr + 2 * ptr_size
+
+            if zti_size == 3 * ptr_size:
+                # __si_class_type_info: slot 2 is the base _ZTI* pointer
+                base_ptr = read_ptr(slot2_addr)
+                if not base_ptr:
+                    return [], False, False
+                base = resolve_zti(base_ptr)
+                return ([base] if base else []), False, False
+
+            # __vmi_class_type_info: slot 2 = flags(u32) + base_count(u32)
+            flags = read_u32(slot2_addr)
+            base_count = read_u32(slot2_addr + 4)
+            if (
+                flags is None
+                or base_count is None
+                or base_count == 0
+                or base_count > 64
+            ):
+                return [], False, False
+
+            has_virtual = False
+            base_names: List[str] = []
+            pair_start = slot2_addr + 8
+            pair_stride = ptr_size + 8  # base_ti_ptr + offset_flags (8-byte long)
+
+            for i in range(base_count):
+                base_ptr = read_ptr(pair_start + i * pair_stride)
+                if not base_ptr:
+                    continue
+                off_flags = read_u64(pair_start + i * pair_stride + ptr_size)
+                if off_flags is not None and (off_flags & 1):
+                    has_virtual = True
+                base = resolve_zti(base_ptr)
+                if base:
+                    base_names.append(base)
+
+            return base_names, len(base_names) > 1, has_virtual
+
+        # Iterate over _ZTV* symbols (vtables), skipping external typeinfo vtables.
+        for realname, vaddr in syms_by_name.items():
+            if not realname.startswith("_ZTV") or realname.startswith("_ZTVN"):
+                continue
+            vtable_size = sym_sizes.get(realname, 0)
+            if vtable_size == 0:
+                continue
+            class_name = itanium_name(realname[4:])
+            if not class_name:
+                continue
+
+            entries = read_vtable(vaddr, vtable_size)
+            zti_name = "_ZTI" + realname[4:]
+            base_classes, has_multi, has_virtual = parse_gcc_rtti(zti_name)
+
+            yield ClassInfo(
+                name=class_name,
+                vtable_addr=vaddr,
+                vtable=entries,
+                base_classes=base_classes,
+                has_multiple_inheritance=has_multi,
+                has_virtual_inheritance=has_virtual,
+            )
+
     def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> IR | None:
         """
         Returns the Intermediate Representation data based on the instruction given

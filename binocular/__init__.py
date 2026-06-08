@@ -12,11 +12,13 @@ from .primitives import (
     BasicBlock,
     Binary,
     Branch,
+    ClassInfo,
     Instruction,
     NativeFunction,
     Reference,
     SourceFunction,
     Variable,
+    VTableEntry,
 )
 from .rizin import Rizin
 from .binja import BinaryNinja
@@ -48,4 +50,6 @@ __all__ = [
     "Variable",
     "IndirectToken",
     "Reference",
+    "ClassInfo",
+    "VTableEntry",
 ]

@@ -24,7 +24,16 @@ if typing.TYPE_CHECKING:
 from .core import GhidraBase
 from ..consts import IL, BranchType, Endian, RefType
 from ..disassembler import Disassembler
-from ..primitives import IR, Argument, Branch, Instruction, Reference, Variable
+from ..primitives import (
+    IR,
+    Argument,
+    Branch,
+    ClassInfo,
+    Instruction,
+    Reference,
+    Variable,
+    VTableEntry,
+)
 
 logger = logging.getLogger("BINocular")
 
@@ -630,6 +639,247 @@ class Ghidra(GhidraBase):
         bundle_host.enable(bundle_file)
         bundle = bundle_host.getGhidraBundle(bundle_file)
         bundle_host.activateAll([bundle], self.monitor, PrintWriter(StringWriter()))
+
+    @typing_extensions.override
+    def get_classes(self) -> typing.Iterable[ClassInfo]:
+        ptr_size = self.get_bitness() // 8
+        symtab = self.program.getSymbolTable()
+
+        for sym in symtab.getSymbolIterator():
+            name = str(sym.getName())
+            is_gcc = name.startswith("_ZTV")
+            is_msvc = not is_gcc and (
+                "vftable" in name.lower()
+                or (name.startswith("??_7") and name.endswith("@@6B@"))
+            )
+            if not (is_gcc or is_msvc):
+                continue
+
+            class_name = self._rtti_demangle(name)
+            if not class_name:
+                continue
+
+            vtable_addr = sym.getAddress()
+            entries = self._rtti_read_vtable(vtable_addr, ptr_size, is_gcc)
+
+            if is_gcc:
+                zti_name = "_ZTI" + name[4:]
+                base_classes, has_multi, has_virtual = self._rtti_parse_gcc(
+                    zti_name, ptr_size
+                )
+            else:
+                base_classes, has_multi, has_virtual = [], False, False
+
+            yield ClassInfo(
+                name=class_name,
+                vtable_addr=vtable_addr.getOffset(),
+                vtable=entries,
+                base_classes=base_classes,
+                has_multiple_inheritance=has_multi,
+                has_virtual_inheritance=has_virtual,
+            )
+
+    def _rtti_read_ptr(self, addr, ptr_size: int) -> int | None:
+        """Read a native-width pointer from addr; returns unsigned value or None."""
+        memory = self.program.getMemory()
+        try:
+            if ptr_size == 8:
+                return int(memory.getLong(addr)) & 0xFFFFFFFFFFFFFFFF
+            else:
+                return int(memory.getInt(addr)) & 0xFFFFFFFF
+        except Exception:
+            return None
+
+    def _rtti_is_exec(self, addr_val: int) -> bool:
+        if not addr_val:
+            return False
+        try:
+            block = self.program.getMemory().getBlock(self._mk_addr(addr_val))
+            return block is not None and block.isExecute()
+        except Exception:
+            return False
+
+    def _rtti_is_pure_virtual(self, addr_val: int) -> bool:
+        try:
+            for sym in self.program.getSymbolTable().getSymbols(
+                self._mk_addr(addr_val)
+            ):
+                n = str(sym.getName())
+                if "__cxa_pure_virtual" in n or "_purecall" in n or "purevirt" in n:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _rtti_demangle(self, mangled: str) -> str | None:
+        """Return the demangled class name from a vtable symbol name."""
+        try:
+            from ghidra.app.util import DemanglerUtil
+
+            result = DemanglerUtil.demangle(self.program, mangled)
+            if result is not None:
+                sig = str(result.getSignature(False))
+                if "vtable for " in sig:
+                    return sig.split("vtable for ", 1)[1].strip()
+                if "::`vftable'" in sig:
+                    name = sig.split("::`vftable'")[0].strip()
+                    if name.startswith("const "):
+                        name = name[6:]
+                    return name
+        except Exception:
+            pass
+        if mangled.startswith("_ZTV"):
+            return self._rtti_itanium_name(mangled[4:])
+        return None
+
+    def _rtti_itanium_name(self, suffix: str) -> str | None:
+        """Manually decode an Itanium ABI class name from the post-_ZTV suffix."""
+        if not suffix:
+            return None
+        if suffix[0] == "N":
+            parts, i = [], 1
+            while i < len(suffix) and suffix[i] != "E":
+                if not suffix[i].isdigit():
+                    i += 1
+                    continue
+                j = i
+                while j < len(suffix) and suffix[j].isdigit():
+                    j += 1
+                n = int(suffix[i:j])
+                if j + n > len(suffix):
+                    break
+                parts.append(suffix[j : j + n])
+                i = j + n
+            return "::".join(parts) if parts else None
+        elif suffix[0].isdigit():
+            i = 0
+            while i < len(suffix) and suffix[i].isdigit():
+                i += 1
+            n = int(suffix[:i])
+            return suffix[i : i + n] if i + n <= len(suffix) else None
+        return None
+
+    def _rtti_read_vtable(self, vtable_addr, ptr_size: int, is_gcc: bool) -> list:
+        # Find the first slot that points to executable code.
+        start_slot = 0
+        if is_gcc:
+            for i in range(4):
+                val = self._rtti_read_ptr(vtable_addr.add(i * ptr_size), ptr_size)
+                if val is not None and self._rtti_is_exec(val):
+                    start_slot = i
+                    break
+            else:
+                start_slot = 2  # default: skip offset-to-top + typeinfo ptr
+
+        entries: list = []
+        slot = 0
+        addr = vtable_addr.add(start_slot * ptr_size)
+        consecutive_bad = 0
+
+        while consecutive_bad < 3:
+            val = self._rtti_read_ptr(addr, ptr_size)
+            if val is None:
+                break
+            is_pure = self._rtti_is_pure_virtual(val)
+            if not is_pure and not self._rtti_is_exec(val):
+                consecutive_bad += 1
+                addr = addr.add(ptr_size)
+                slot += 1
+                continue
+            consecutive_bad = 0
+            entries.append(
+                VTableEntry(
+                    slot=slot,
+                    byte_offset=(start_slot + slot) * ptr_size,
+                    func_addr=None if is_pure else val,
+                )
+            )
+            slot += 1
+            addr = addr.add(ptr_size)
+
+        return entries
+
+    def _rtti_resolve_zti(self, zti_ptr_val: int) -> str | None:
+        """Given a pointer to a _ZTI structure, return the demangled class name."""
+        try:
+            addr = self._mk_addr(zti_ptr_val)
+            for sym in self.program.getSymbolTable().getSymbols(addr):
+                sname = str(sym.getName())
+                if sname.startswith("_ZTI"):
+                    return self._rtti_demangle("_ZTV" + sname[4:])
+        except Exception:
+            pass
+        return None
+
+    def _rtti_parse_gcc(
+        self, zti_name: str, ptr_size: int
+    ) -> tuple[list[str], bool, bool]:
+        """
+        Parse a GCC __class_type_info to extract base class names and flags.
+        Returns (base_classes, has_multiple_inheritance, has_virtual_inheritance).
+
+        Detection strategy (avoids resolving the vptr, which points into external
+        libstdc++ symbols that Ghidra can't look up by address):
+
+          - __class_type_info    (no bases): struct ends at slot 1; slot 2 read returns None.
+          - __si_class_type_info (1 base):   slot 2 holds a pointer to the base _ZTI*.
+          - __vmi_class_type_info (N bases): slot 2 holds flags(u32) || base_count(u32).
+
+        A vmi flags value (0–7) is too small to collide with any valid _ZTI address.
+        Uses memory.getInt/getLong (not getBytes) since JPype doesn't update Python
+        bytearrays in-place when passed to Java byte[] parameters.
+        """
+        symtab = self.program.getSymbolTable()
+        syms = list(symtab.getGlobalSymbols(zti_name))
+        if not syms:
+            return [], False, False
+
+        ti_addr = syms[0].getAddress()
+        memory = self.program.getMemory()
+
+        slot2_addr = ti_addr.add(2 * ptr_size)
+        slot2_val = self._rtti_read_ptr(slot2_addr, ptr_size)
+        if slot2_val is None:
+            return [], False, False  # __class_type_info: no bases
+
+        # Si check: does slot 2 hold a valid _ZTI* address?
+        base = self._rtti_resolve_zti(slot2_val)
+        if base is not None:
+            return [base], False, False
+
+        # Vmi: slot 2 encodes flags(u32) + base_count(u32).
+        # getInt reads in program endianness, so the first u32 is always flags.
+        try:
+            flags = int(memory.getInt(slot2_addr)) & 0xFFFFFFFF
+            base_count = int(memory.getInt(slot2_addr.add(4))) & 0xFFFFFFFF
+        except Exception:
+            return [], False, False
+
+        if base_count == 0 or base_count > 64 or flags > 7:
+            return [], False, False
+
+        has_virtual = False
+        base_names: list[str] = []
+        pair_start = slot2_addr.add(8)
+        pair_stride = ptr_size + 8  # base_ti_ptr + offset_flags (8-byte long)
+
+        for i in range(base_count):
+            base_ptr = self._rtti_read_ptr(pair_start.add(i * pair_stride), ptr_size)
+            if not base_ptr:
+                continue
+            # Bit 0 of the per-base offset_flags signals virtual inheritance for this base.
+            off_flags_addr = pair_start.add(i * pair_stride + ptr_size)
+            try:
+                per_flags = int(memory.getLong(off_flags_addr)) & 0xFFFFFFFFFFFFFFFF
+                if per_flags & 1:
+                    has_virtual = True
+            except Exception:
+                pass
+            base_name = self._rtti_resolve_zti(base_ptr)
+            if base_name:
+                base_names.append(base_name)
+
+        return base_names, len(base_names) > 1, has_virtual
 
     def run_script(
         self, script: str, timeout: int, script_args: typing.List[str] | None = None
