@@ -19,6 +19,7 @@ from .primitives import (
     Binary,
     Branch,
     Argument,
+    ClassInfo,
     Variable,
     Reference,
     BasicBlock,
@@ -129,6 +130,10 @@ class Disassembler(ABC):
         :returns: list of strings in the file (similar to the strings unix utility)
         """
         return self._strings()
+
+    def get_classes(self) -> Iterable[ClassInfo]:
+        """Returns C++ class information recovered from RTTI and vtable analysis."""
+        return []
 
     def get_binary_name(self) -> str:
         """Returns the name of the binary loaded"""
@@ -350,10 +355,27 @@ class Disassembler(ABC):
             self._binary.functions = self._functions
             self._binary.build_indexes()
             self._binary._disassembler = self
+            self._load_classes()
         except Exception as e:
             logger.critical(f"Failed to load binary: {e}")
             self.is_loaded = False
             raise
+
+    def _load_classes(self) -> None:
+        if self._binary is None:
+            return
+        try:
+            for cls in self.get_classes():
+                self._binary.classes[cls.name] = cls
+        except Exception as e:
+            logger.warning(f"[{self.name}] RTTI extraction failed: {e}")
+            return
+        # Back-fill derived_classes by inverting the base_classes relationships.
+        for cls in self._binary.classes.values():
+            for base_name in cls.base_classes:
+                base = self._binary.classes.get(base_name)
+                if base is not None and cls.name not in base.derived_classes:
+                    base.derived_classes.append(cls.name)
 
     def _load_binary(self) -> Binary:
         b = Binary(

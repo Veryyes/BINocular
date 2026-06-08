@@ -415,6 +415,226 @@ class BinaryNinja(Disassembler):
         return instr.vex()
 
     @override
+    def get_classes(self) -> Iterable[typing.Any]:
+        from .primitives import ClassInfo
+
+        bn = _import_binja()
+        ptr_size = self.get_bitness() // 8
+        is_big_endian = self.bv.endianness == bn.Endianness.BigEndian
+
+        for name, sym_list in self.bv.symbols.items():
+            is_gcc = name.startswith("_ZTV")
+            is_msvc = not is_gcc and (
+                "vftable" in name.lower()
+                or (name.startswith("??_7") and name.endswith("@@6B@"))
+            )
+            if not (is_gcc or is_msvc):
+                continue
+
+            for sym in sym_list:
+                class_name = self._bn_demangle(name, is_gcc)
+                if not class_name:
+                    continue
+
+                vtable_addr = sym.address
+                entries = self._bn_read_vtable(
+                    vtable_addr, ptr_size, is_big_endian, is_gcc
+                )
+
+                if is_gcc:
+                    zti_name = "_ZTI" + name[4:]
+                    base_classes, has_multi, has_virtual = self._bn_parse_gcc_rtti(
+                        zti_name, ptr_size, is_big_endian
+                    )
+                else:
+                    base_classes, has_multi, has_virtual = [], False, False
+
+                yield ClassInfo(
+                    name=class_name,
+                    vtable_addr=vtable_addr,
+                    vtable=entries,
+                    base_classes=base_classes,
+                    has_multiple_inheritance=has_multi,
+                    has_virtual_inheritance=has_virtual,
+                )
+
+    def _bn_read_ptr(self, addr: int, ptr_size: int, is_big_endian: bool) -> int | None:
+        import struct
+
+        raw = self.bv.read(addr, ptr_size)
+        if not raw or len(raw) < ptr_size:
+            return None
+        endian = ">" if is_big_endian else "<"
+        fmt = f"{endian}{'Q' if ptr_size == 8 else 'I'}"
+        return struct.unpack(fmt, raw)[0]
+
+    def _bn_is_exec(self, addr_val: int) -> bool:
+        if not addr_val:
+            return False
+        seg = self.bv.get_segment_at(addr_val)
+        return seg is not None and seg.executable
+
+    def _bn_is_pure_virtual(self, addr_val: int) -> bool:
+        syms = self.bv.get_symbols_at(addr_val)
+        for sym in syms:
+            if any(
+                kw in sym.name for kw in ("__cxa_pure_virtual", "_purecall", "purevirt")
+            ):
+                return True
+        return False
+
+    def _bn_demangle(self, mangled: str, is_gcc: bool) -> str | None:
+        bn = _import_binja()
+        try:
+            if is_gcc:
+                _type, parts = bn.demangle_gnu3(self.bv.arch, mangled, simplify=True)
+                if parts:
+                    full = "::".join(parts) if isinstance(parts, list) else str(parts)
+                    if "vtable for " in full:
+                        return full.split("vtable for ", 1)[1].strip()
+                    # parts may already be [class_name] without the "vtable for" prefix
+                    return full
+            else:
+                _type, parts = bn.demangle_ms(self.bv.arch, mangled, simplify=True)
+                if parts:
+                    full = "::".join(parts) if isinstance(parts, list) else str(parts)
+                    if "::`vftable'" in full:
+                        name = full.split("::`vftable'")[0].strip()
+                        if name.startswith("const "):
+                            name = name[6:]
+                        return name
+        except Exception:
+            pass
+        if is_gcc and mangled.startswith("_ZTV"):
+            from .rtti_util import itanium_name
+
+            return itanium_name(mangled[4:])
+        return None
+
+    def _bn_read_vtable(
+        self, vtable_addr: int, ptr_size: int, is_big_endian: bool, is_gcc: bool
+    ) -> list:
+        from .primitives import VTableEntry
+
+        start_slot = 0
+        if is_gcc:
+            for i in range(4):
+                val = self._bn_read_ptr(
+                    vtable_addr + i * ptr_size, ptr_size, is_big_endian
+                )
+                if val is not None and self._bn_is_exec(val):
+                    start_slot = i
+                    break
+            else:
+                start_slot = 2
+
+        # Cap slots using BN's data-variable width to avoid over-reading into the VTT.
+        try:
+            dv = self.bv.get_data_var_at(vtable_addr)
+            max_slots = (
+                (dv.type.width // ptr_size) if dv and dv.type and dv.type.width else 512
+            )
+        except Exception:
+            max_slots = 512
+
+        entries: list = []
+        slot = 0
+        addr = vtable_addr + start_slot * ptr_size
+        consecutive_bad = 0
+
+        while consecutive_bad < 3 and slot < max_slots:
+            val = self._bn_read_ptr(addr, ptr_size, is_big_endian)
+            if val is None:
+                break
+            is_pure = self._bn_is_pure_virtual(val)
+            if not is_pure and not self._bn_is_exec(val):
+                consecutive_bad += 1
+                addr += ptr_size
+                slot += 1
+                continue
+            consecutive_bad = 0
+            entries.append(
+                VTableEntry(
+                    slot=slot,
+                    byte_offset=(start_slot + slot) * ptr_size,
+                    func_addr=None if is_pure else val,
+                )
+            )
+            slot += 1
+            addr += ptr_size
+
+        return entries
+
+    def _bn_resolve_zti(self, zti_ptr: int) -> str | None:
+        syms = self.bv.get_symbols_at(zti_ptr)
+        for sym in syms:
+            if sym.name.startswith("_ZTI"):
+                return self._bn_demangle("_ZTV" + sym.name[4:], is_gcc=True)
+        return None
+
+    def _bn_parse_gcc_rtti(
+        self, zti_name: str, ptr_size: int, is_big_endian: bool
+    ) -> tuple[list[str], bool, bool]:
+        import struct
+
+        zti_syms = self.bv.symbols.get(zti_name, [])
+        if not zti_syms:
+            return [], False, False
+
+        ti_addr = zti_syms[0].address
+        vptr_val = self._bn_read_ptr(ti_addr, ptr_size, is_big_endian)
+        if vptr_val is None:
+            return [], False, False
+
+        is_si = is_vmi = False
+        for sym in self.bv.get_symbols_at(vptr_val):
+            if "vmi_class_type_info" in sym.name:
+                is_vmi = True
+            elif "si_class_type_info" in sym.name:
+                is_si = True
+
+        if not is_si and not is_vmi:
+            return [], False, False
+
+        if is_si:
+            base_ptr = self._bn_read_ptr(
+                ti_addr + 2 * ptr_size, ptr_size, is_big_endian
+            )
+            if not base_ptr:
+                return [], False, False
+            base = self._bn_resolve_zti(base_ptr)
+            return ([base] if base else []), False, False
+
+        endian = ">" if is_big_endian else "<"
+        flags_off = ti_addr + 2 * ptr_size
+        raw4 = self.bv.read(flags_off, 4)
+        raw4b = self.bv.read(flags_off + 4, 4)
+        if not raw4 or not raw4b:
+            return [], False, False
+
+        flags = struct.unpack(f"{endian}I", raw4)[0]
+        base_count = struct.unpack(f"{endian}I", raw4b)[0]
+        if base_count > 64:
+            return [], False, False
+
+        has_virtual = bool(flags & 1)
+        base_names: list[str] = []
+        pair_start = flags_off + 8
+        pair_stride = ptr_size + 8
+
+        for i in range(base_count):
+            base_ptr = self._bn_read_ptr(
+                pair_start + i * pair_stride, ptr_size, is_big_endian
+            )
+            if not base_ptr:
+                continue
+            base = self._bn_resolve_zti(base_ptr)
+            if base:
+                base_names.append(base)
+
+        return base_names, len(base_names) > 1, has_virtual
+
+    @override
     def get_instruction_comment(self, instr_addr: int) -> str | None:
         funcs = self.bv.get_functions_containing(instr_addr)
         if not funcs:

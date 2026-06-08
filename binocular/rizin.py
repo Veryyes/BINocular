@@ -488,6 +488,246 @@ class Rizin(Disassembler):
 
         return instrs
 
+    @override
+    def get_classes(self) -> Iterable[Any]:
+        from .primitives import ClassInfo
+        from .rtti_util import itanium_name
+
+        ptr_size = max(self.get_bitness() // 8, 1)
+        is_le = self.get_endianness() != Endian.BIG
+        ptr_fmt = ("<" if is_le else ">") + ("Q" if ptr_size == 8 else "I")
+        u32_fmt = ("<" if is_le else ">") + "I"
+        u64_fmt = "<Q" if is_le else ">Q"
+
+        try:
+            sym_list = self.pipe.cmdj("isj") or []
+        except Exception:
+            return
+
+        syms_by_name: Dict[str, int] = {}
+        syms_by_addr: Dict[int, str] = {}
+        sym_sizes: Dict[str, int] = {}
+
+        for s in sym_list:
+            rn = s.get("realname") or ""
+            va = s.get("vaddr", 0)
+            sz = s.get("size", 0)
+            if rn and va:
+                syms_by_name[rn] = va
+                syms_by_addr[va] = rn
+            if rn and sz:
+                sym_sizes[rn] = sz
+
+        exec_ranges: List[Tuple[int, int]] = []
+        try:
+            for sec in self.pipe.cmdj("iSj") or []:
+                perm = sec.get("perm") or ""
+                if "x" in perm:
+                    lo = sec.get("vaddr", 0)
+                    hi = lo + sec.get("vsize", sec.get("size", 0))
+                    if lo and hi > lo:
+                        exec_ranges.append((lo, hi))
+        except Exception:
+            pass
+
+        for realname, vaddr in syms_by_name.items():
+            if not realname.startswith("_ZTV") or realname.startswith("_ZTVN"):
+                continue
+            vtable_size = sym_sizes.get(realname, 0)
+            if vtable_size == 0:
+                continue
+            class_name = itanium_name(realname[4:])
+            if not class_name:
+                continue
+
+            entries = self._rz_read_vtable(
+                vaddr, vtable_size, ptr_size, ptr_fmt, exec_ranges
+            )
+            zti_name = "_ZTI" + realname[4:]
+            base_classes, has_multi, has_virtual = self._rz_parse_gcc_rtti(
+                zti_name,
+                syms_by_name,
+                syms_by_addr,
+                sym_sizes,
+                ptr_size,
+                ptr_fmt,
+                u32_fmt,
+                u64_fmt,
+            )
+
+            yield ClassInfo(
+                name=class_name,
+                vtable_addr=vaddr,
+                vtable=entries,
+                base_classes=base_classes,
+                has_multiple_inheritance=has_multi,
+                has_virtual_inheritance=has_virtual,
+            )
+
+    def _rz_read_chunk(self, addr: int, size: int) -> bytes | None:
+        try:
+            raw = self.pipe.cmdj(f"pxj {size} @ {addr}")
+            if not raw or len(raw) < size:
+                return None
+            return bytes(raw[:size])
+        except Exception:
+            return None
+
+    def _rz_read_ptr(self, addr: int, ptr_size: int, ptr_fmt: str) -> int | None:
+        import struct
+
+        data = self._rz_read_chunk(addr, ptr_size)
+        return struct.unpack(ptr_fmt, data)[0] if data else None
+
+    def _rz_read_u32(self, addr: int, u32_fmt: str) -> int | None:
+        import struct
+
+        data = self._rz_read_chunk(addr, 4)
+        return struct.unpack(u32_fmt, data)[0] if data else None
+
+    def _rz_read_u64(self, addr: int, u64_fmt: str) -> int | None:
+        import struct
+
+        data = self._rz_read_chunk(addr, 8)
+        return struct.unpack(u64_fmt, data)[0] if data else None
+
+    @staticmethod
+    def _rz_addr_is_exec(addr: int, exec_ranges: List[Tuple[int, int]]) -> bool:
+        return bool(addr) and any(lo <= addr < hi for lo, hi in exec_ranges)
+
+    def _rz_resolve_zti(self, ptr_val: int, syms_by_addr: Dict[int, str]) -> str | None:
+        from .rtti_util import itanium_name
+
+        sname = syms_by_addr.get(ptr_val, "")
+        if sname.startswith("_ZTI"):
+            return itanium_name(sname[4:])
+        return None
+
+    def _rz_read_vtable(
+        self,
+        vtable_addr: int,
+        vtable_size: int,
+        ptr_size: int,
+        ptr_fmt: str,
+        exec_ranges: List[Tuple[int, int]],
+    ) -> list:
+        """
+        Read vtable function slots using the known byte size of the vtable symbol.
+
+        In a PIE ELF, Rizin reads raw file bytes for .data.rel.ro:
+          - R_X86_64_RELATIVE slots store the addend (= function vaddr at base 0) → exec
+          - R_X86_64_64 for __cxa_pure_virtual → non-exec, non-zero fake address
+          - Abstract-class dtor slots with no relocation → 0 (skip silently)
+
+        Classification after skipping the header (offset-to-top + typeinfo ptr):
+          - addr is exec            → regular virtual function
+          - addr is 0               → unresolved slot (abstract dtor), skip
+          - addr is non-zero non-exec → pure virtual marker (func_addr=None)
+        """
+        from .primitives import VTableEntry
+
+        total_slots = vtable_size // ptr_size
+        start_slot = 2  # default: skip offset-to-top + typeinfo
+        for i in range(min(4, total_slots)):
+            val = self._rz_read_ptr(vtable_addr + i * ptr_size, ptr_size, ptr_fmt)
+            if val and self._rz_addr_is_exec(val, exec_ranges):
+                start_slot = i
+                break
+
+        entries: list = []
+        for slot in range(total_slots - start_slot):
+            val = self._rz_read_ptr(
+                vtable_addr + (start_slot + slot) * ptr_size, ptr_size, ptr_fmt
+            )
+            if val is None:
+                break
+            if val == 0:
+                continue  # abstract-class dtor slot with no RELA in file
+            if self._rz_addr_is_exec(val, exec_ranges):
+                entries.append(
+                    VTableEntry(
+                        slot=slot,
+                        byte_offset=(start_slot + slot) * ptr_size,
+                        func_addr=val,
+                    )
+                )
+            else:
+                # Non-zero, non-exec: Rizin resolved an external symbol reference
+                # (e.g. __cxa_pure_virtual via R_X86_64_64) to a fake address.
+                entries.append(
+                    VTableEntry(
+                        slot=slot,
+                        byte_offset=(start_slot + slot) * ptr_size,
+                        func_addr=None,
+                    )
+                )
+        return entries
+
+    def _rz_parse_gcc_rtti(
+        self,
+        zti_name: str,
+        syms_by_name: Dict[str, int],
+        syms_by_addr: Dict[int, str],
+        sym_sizes: Dict[str, int],
+        ptr_size: int,
+        ptr_fmt: str,
+        u32_fmt: str,
+        u64_fmt: str,
+    ) -> tuple[list[str], bool, bool]:
+        """
+        Structural RTTI parsing using symbol size to distinguish typeinfo subtypes
+        without chasing the vptr (which points to external libstdc++ symbols with
+        fake addresses in Rizin):
+          - size == 2*ptr_size → __class_type_info:    no bases
+          - size == 3*ptr_size → __si_class_type_info: 1 base at slot 2
+          - size  > 3*ptr_size → __vmi_class_type_info: flags+count at slot 2
+        """
+        zti_addr = syms_by_name.get(zti_name, 0)
+        if not zti_addr:
+            return [], False, False
+
+        zti_size = sym_sizes.get(zti_name, 0)
+        if zti_size <= 2 * ptr_size:
+            return [], False, False  # __class_type_info: no bases
+
+        slot2_addr = zti_addr + 2 * ptr_size
+
+        if zti_size == 3 * ptr_size:
+            # __si_class_type_info: slot 2 is the base _ZTI* pointer
+            base_ptr = self._rz_read_ptr(slot2_addr, ptr_size, ptr_fmt)
+            if not base_ptr:
+                return [], False, False
+            base = self._rz_resolve_zti(base_ptr, syms_by_addr)
+            return ([base] if base else []), False, False
+
+        # __vmi_class_type_info: slot 2 = flags(u32) + base_count(u32)
+        flags = self._rz_read_u32(slot2_addr, u32_fmt)
+        base_count = self._rz_read_u32(slot2_addr + 4, u32_fmt)
+        if flags is None or base_count is None or base_count == 0 or base_count > 64:
+            return [], False, False
+
+        has_virtual = False
+        base_names: List[str] = []
+        pair_start = slot2_addr + 8
+        pair_stride = ptr_size + 8  # base_ti_ptr + offset_flags (8-byte long)
+
+        for i in range(base_count):
+            base_ptr = self._rz_read_ptr(
+                pair_start + i * pair_stride, ptr_size, ptr_fmt
+            )
+            if not base_ptr:
+                continue
+            off_flags = self._rz_read_u64(
+                pair_start + i * pair_stride + ptr_size, u64_fmt
+            )
+            if off_flags is not None and (off_flags & 1):
+                has_virtual = True
+            base = self._rz_resolve_zti(base_ptr, syms_by_addr)
+            if base:
+                base_names.append(base)
+
+        return base_names, len(base_names) > 1, has_virtual
+
     def get_ir_from_instruction(self, instr_addr: int, instr: Instruction) -> IR | None:
         """
         Returns the Intermediate Representation data based on the instruction given

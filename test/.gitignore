@@ -3,3 +3,6 @@ example2
 example3
 example_stripped
 __pycache__/
+rtti_diamond
+rtti_inherit
+rtti_simple

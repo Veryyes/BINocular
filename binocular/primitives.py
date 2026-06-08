@@ -112,6 +112,36 @@ class Reference(BaseModel):
         return f"{hex(self.from_)} -{self.type.name}-> {hex(self.to)}"
 
 
+class VTableEntry(BaseModel):
+    """A single slot in a C++ virtual function table."""
+
+    slot: int
+    """0-based virtual function index within this vtable."""
+    byte_offset: int
+    """Byte offset from the start of the vtable to this slot."""
+    func_addr: int | None = None
+    """Address of the virtual function implementation, or None if pure virtual."""
+
+
+class ClassInfo(BaseModel):
+    """Recovered C++ class information including vtable layout and inheritance."""
+
+    name: str
+    """Demangled class name."""
+    vtable_addr: int | None = None
+    """Address of the primary vtable, or None if the class has no vtable."""
+    vtable: List[VTableEntry] = []
+    """Ordered list of virtual function table entries."""
+    base_classes: List[str] = []
+    """Demangled names of direct base classes, in declaration order."""
+    derived_classes: List[str] = []
+    """Demangled names of known direct derived classes (populated after all classes load)."""
+    has_multiple_inheritance: bool = False
+    """True if this class inherits from more than one direct base class."""
+    has_virtual_inheritance: bool = False
+    """True if any base class is inherited virtually."""
+
+
 class Argument(BaseModel):
     """Represents a single argument in a function"""
 
@@ -730,6 +760,9 @@ class Binary(NativeCode):
 
     # Strings from String table if they exists, otherwise strings detected in the binary (like unix `strings`` command)
     strings: Set[str] = set([])
+
+    classes: Dict[str, "ClassInfo"] = {}
+    """Recovered C++ class information keyed by demangled class name."""
 
     def __len__(self) -> int:
         """returns the size of the binary in bytes"""
